@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jake's Arcade</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;600;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a1a;
+    color: #fff;
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .bg-grid {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .glow-orb {
+    position: fixed;
+    border-radius: 50%;
+    filter: blur(120px);
+    opacity: 0.15;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .glow-orb.purple { width: 500px; height: 500px; background: #8b5cf6; top: -100px; right: -100px; }
+  .glow-orb.blue { width: 400px; height: 400px; background: #3b82f6; bottom: -50px; left: -50px; }
+  .glow-orb.green { width: 300px; height: 300px; background: #10b981; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+
+  header {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 50px 20px 30px;
+  }
+
+  header h1 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: clamp(28px, 5vw, 56px);
+    background: linear-gradient(135deg, #f59e0b, #ef4444, #8b5cf6, #3b82f6);
+    background-size: 300% 300%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: gradient-shift 4s ease infinite;
+    text-shadow: none;
+    margin-bottom: 12px;
+  }
+
+  @keyframes gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  header p {
+    font-size: clamp(14px, 2vw, 18px);
+    color: #94a3b8;
+    font-weight: 400;
+  }
+
+  .games-grid {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 24px;
+    max-width: 1200px;
+    margin: 40px auto;
+    padding: 0 24px 60px;
+  }
+
+  .game-card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+
+  .game-card:hover {
+    transform: translateY(-6px);
+    border-color: rgba(255,255,255,0.2);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+  }
+
+  .game-card:hover .card-thumb {
+    transform: scale(1.05);
+  }
+
+  .card-thumb-wrapper {
+    width: 100%;
+    height: 180px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .card-thumb {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 64px;
+    transition: transform 0.3s ease;
+  }
+
+  .card-body {
+    padding: 20px;
+  }
+
+  .card-body h3 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 13px;
+    margin-bottom: 8px;
+    line-height: 1.5;
+  }
+
+  .card-body p {
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.6;
+  }
+
+  .card-tag {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .tag-action { background: rgba(239,68,68,0.2); color: #f87171; }
+  .tag-strategy { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  .tag-rpg { background: rgba(139,92,246,0.2); color: #a78bfa; }
+  .tag-arcade { background: rgba(245,158,11,0.2); color: #fbbf24; }
+  .tag-puzzle { background: rgba(16,185,129,0.2); color: #34d399; }
+  .tag-fighting { background: rgba(236,72,153,0.2); color: #f472b6; }
+  .tag-platformer { background: rgba(6,182,212,0.2); color: #22d3ee; }
+  .tag-runner { background: rgba(251,146,60,0.2); color: #fb923c; }
+
+  .play-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 14px;
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #8b5cf6, #6366f1);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    pointer-events: none;
+  }
+
+  .coming-soon .card-thumb-wrapper { opacity: 0.4; }
+  .coming-soon .card-body { opacity: 0.5; }
+  .coming-soon .play-btn {
+    background: rgba(255,255,255,0.1);
+  }
+  .coming-soon { pointer-events: none; }
+
+  footer {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 30px;
+    color: #475569;
+    font-size: 13px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<div class="glow-orb purple"></div>
+<div class="glow-orb blue"></div>
+<div class="glow-orb green"></div>
+
+<header>
+  <h1>JAKE'S ARCADE</h1>
+  <p>Pick a game. Start playing. No downloads, no sign-ups.</p>
+</header>
+
+<div class="games-grid">
+
+  <a href="games/zombie-siege/index.html" class="game-card">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #1a1a2e, #16213e);">
+        <span>&#x1F9DF;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Zombie Siege</h3>
+      <p>Survive endless waves of zombies. 4 weapons, boss fights, and chaos.</p>
+      <span class="card-tag tag-action">Action</span>
+      <div class="play-btn">&#9654; PLAY</div>
+    </div>
+  </a>
+
+  <a href="games/pong-championship/index.html" class="game-card coming-soon">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #0f172a, #1e293b);">
+        <span>&#x1F3D3;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Pong Championship</h3>
+      <p>Enhanced Pong with special abilities, power-ups, and tournament mode.</p>
+      <span class="card-tag tag-arcade">Arcade</span>
+      <div class="play-btn">COMING SOON</div>
+    </div>
+  </a>
+
+  <a href="games/tower-defence/index.html" class="game-card coming-soon">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #14532d, #064e3b);">
+        <span>&#x1F3F0;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Tower Defence TD</h3>
+      <p>Place towers along the path to stop waves of enemies. Upgrade and survive.</p>
+      <span class="card-tag tag-strategy">Strategy</span>
+      <div class="play-btn">COMING SOON</div>
+    </div>
+  </a>
+
+  <a href="games/dungeon-crawler/index.html" class="game-card coming-soon">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #312e81, #1e1b4b);">
+        <span>&#x1F5E1;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Dungeon Crawler</h3>
+      <p>Explore random dungeons, fight monsters, collect loot, level up.</p>
+      <span class="card-tag tag-rpg">RPG</span>
+      <div class="play-btn">COMING SOON</div>
+    </div>
+  </a>
+
+  <a href="games/space-invaders/index.html" class="game-card coming-soon">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #0c0a1a, #1a0a2e);">
+        <span>&#x1F47E;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Space Invaders Remix</h3>
+      <p>Classic space invaders with modern power-ups, bosses, and combos.</p>
+      <span class="card-tag tag-arcade">Arcade</span>
+      <div class="play-btn">COMING SOON</div>
+    </div>
+  </a>
+
+  <a href="games/stick-fighter/index.html" class="game-card coming-soon">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #451a03, #78350f);">
+        <span>&#x1F94A;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Stick Fighter</h3>
+      <p>Local 2-player stick figure fighting with combos and special moves.</p>
+      <span class="card-tag tag-fighting">Fighting</span>
+      <div class="play-btn">COMING SOON</div>
+    </div>
+  </a>
+
+  <a href="games/platformer-quest/index.html" class="game-card coming-soon">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #0e4429, #006d32);">
+        <span>&#x1F3AE;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Platformer Quest</h3>
+      <p>Side-scrolling platformer with wall jumps, collectables, and boss fights.</p>
+      <span class="card-tag tag-platformer">Platformer</span>
+      <div class="play-btn">COMING SOON</div>
+    </div>
+  </a>
+
+  <a href="games/escape-room/index.html" class="game-card coming-soon">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #134e4a, #064e3b);">
+        <span>&#x1F510;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Escape Room</h3>
+      <p>Point-and-click puzzle rooms with hidden clues and logic puzzles.</p>
+      <span class="card-tag tag-puzzle">Puzzle</span>
+      <div class="play-btn">COMING SOON</div>
+    </div>
+  </a>
+
+  <a href="games/endless-runner/index.html" class="game-card coming-soon">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #7c2d12, #9a3412);">
+        <span>&#x1F3C3;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Endless Runner</h3>
+      <p>Side-scrolling runner with obstacles, power-ups, and increasing speed.</p>
+      <span class="card-tag tag-runner">Runner</span>
+      <div class="play-btn">COMING SOON</div>
+    </div>
+  </a>
+
+  <a href="games/tank-wars/index.html" class="game-card coming-soon">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #3f3f46, #27272a);">
+        <span>&#x1F3AF;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Tank Wars</h3>
+      <p>Turn-based tank battles with destructible terrain and different ammo types.</p>
+      <span class="card-tag tag-strategy">Strategy</span>
+      <div class="play-btn">COMING SOON</div>
+    </div>
+  </a>
+
+</div>
+
+<footer>
+  Jake's Arcade &copy; 2026
+</footer>
+
+</body>
+</html>

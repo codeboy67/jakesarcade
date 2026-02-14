@@ -1,0 +1,1677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tank Wars - Jake's Arcade</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #000;
+    overflow: hidden;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    cursor: default;
+    user-select: none;
+}
+canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+}
+#backLink {
+    position: fixed;
+    top: 12px;
+    left: 14px;
+    color: #aaa;
+    font-size: 13px;
+    text-decoration: none;
+    z-index: 100;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    transition: color 0.2s;
+    display: none;
+}
+#backLink:hover { color: #fff; }
+</style>
+</head>
+<body>
+<a id="backLink" href="../../index.html">&larr; Back to Jake's Arcade</a>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ============================================================
+// TANK WARS - A complete turn-based artillery game
+// ============================================================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const backLink = document.getElementById('backLink');
+
+// ---- CONSTANTS ----
+const GRAVITY = 0.15;
+const TANK_WIDTH = 40;
+const TANK_HEIGHT = 20;
+const BARREL_LENGTH = 28;
+const MAX_HP = 100;
+const MAX_FUEL = 80;
+const MOVE_SPEED = 2;
+const POWER_MIN = 10;
+const POWER_MAX = 100;
+const TURN_DELAY = 800;
+const ROUNDS_TO_WIN = 2;
+const BEST_OF = 3;
+
+// ---- AUDIO CONTEXT ----
+let audioCtx = null;
+function ensureAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playSound(type, params = {}) {
+    ensureAudio();
+    const now = audioCtx.currentTime;
+    const g = audioCtx.createGain();
+    g.connect(audioCtx.destination);
+
+    if (type === 'fire') {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(200, now);
+        osc.frequency.exponentialRampToValueAtTime(50, now + 0.3);
+        g.gain.setValueAtTime(0.3, now);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+        osc.connect(g);
+        osc.start(now);
+        osc.stop(now + 0.35);
+        // Add noise burst
+        const bufSize = audioCtx.sampleRate * 0.15;
+        const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufSize);
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buf;
+        const ng = audioCtx.createGain();
+        ng.gain.setValueAtTime(0.25, now);
+        ng.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+        noise.connect(ng);
+        ng.connect(audioCtx.destination);
+        noise.start(now);
+    } else if (type === 'explosion') {
+        const size = params.size || 1;
+        const dur = 0.3 + size * 0.3;
+        const bufSize = audioCtx.sampleRate * dur;
+        const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) {
+            const t = i / bufSize;
+            data[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 1.5) * size;
+        }
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buf;
+        const lp = audioCtx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(800 * size, now);
+        lp.frequency.exponentialRampToValueAtTime(100, now + dur);
+        g.gain.setValueAtTime(0.4 * Math.min(size, 1.5), now);
+        g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+        noise.connect(lp);
+        lp.connect(g);
+        noise.start(now);
+    } else if (type === 'bounce') {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, now);
+        osc.frequency.exponentialRampToValueAtTime(200, now + 0.1);
+        g.gain.setValueAtTime(0.2, now);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+        osc.connect(g);
+        osc.start(now);
+        osc.stop(now + 0.12);
+    } else if (type === 'select') {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.setValueAtTime(550, now + 0.05);
+        g.gain.setValueAtTime(0.08, now);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+        osc.connect(g);
+        osc.start(now);
+        osc.stop(now + 0.12);
+    } else if (type === 'napalm') {
+        const bufSize = audioCtx.sampleRate * 1.5;
+        const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) {
+            const t = i / bufSize;
+            data[i] = (Math.random() * 2 - 1) * (t < 0.1 ? t * 10 : Math.pow(1 - (t - 0.1) / 0.9, 0.5)) * 0.3;
+        }
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = buf;
+        const bp = audioCtx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 400;
+        bp.Q.value = 2;
+        g.gain.setValueAtTime(0.5, now);
+        noise.connect(bp);
+        bp.connect(g);
+        noise.start(now);
+    } else if (type === 'win') {
+        [523, 659, 784, 1047].forEach((f, i) => {
+            const osc = audioCtx.createOscillator();
+            osc.type = 'square';
+            osc.frequency.value = f;
+            const og = audioCtx.createGain();
+            og.gain.setValueAtTime(0, now + i * 0.15);
+            og.gain.linearRampToValueAtTime(0.1, now + i * 0.15 + 0.05);
+            og.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.4);
+            osc.connect(og);
+            og.connect(audioCtx.destination);
+            osc.start(now + i * 0.15);
+            osc.stop(now + i * 0.15 + 0.4);
+        });
+    } else if (type === 'destroy') {
+        for (let i = 0; i < 3; i++) {
+            const delay = i * 0.2;
+            const bufSize = audioCtx.sampleRate * 0.5;
+            const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+            const data = buf.getChannelData(0);
+            for (let j = 0; j < bufSize; j++) {
+                data[j] = (Math.random() * 2 - 1) * Math.pow(1 - j / bufSize, 2);
+            }
+            const noise = audioCtx.createBufferSource();
+            noise.buffer = buf;
+            const eg = audioCtx.createGain();
+            eg.gain.setValueAtTime(0.3, now + delay);
+            eg.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.5);
+            noise.connect(eg);
+            eg.connect(audioCtx.destination);
+            noise.start(now + delay);
+        }
+    }
+}
+
+// ---- GAME STATE ----
+let W, H;
+let gameState = 'menu'; // menu, playing, roundEnd, matchEnd, aiTurn
+let gameMode = '1p'; // 1p, 2p
+let aiDifficulty = 'medium';
+let currentPlayer = 0; // 0 or 1
+let terrain = [];
+let terrainColors = [];
+let wind = 0;
+let tanks = [];
+let projectiles = [];
+let particles = [];
+let explosions = [];
+let napalmFires = [];
+let smokeTrails = [];
+let cameraX = 0;
+let cameraTargetX = 0;
+let cameraFollowing = false;
+let followTarget = null;
+let roundScores = [0, 0];
+let currentRound = 0;
+let turnActive = true;
+let hasFired = false;
+let menuSelection = 'mode'; // mode, difficulty, start
+let selectedMode = 0;
+let selectedDifficulty = 1;
+let terrainTheme = 0;
+let keys = {};
+let shakeAmount = 0;
+let shakeDecay = 0.9;
+let turnTransitionTimer = 0;
+let roundEndTimer = 0;
+let matchEndTimer = 0;
+let aiThinking = false;
+let aiThinkTimer = 0;
+let aiAction = null;
+let projectileActive = false;
+let waitingForEffects = false;
+
+const THEMES = [
+    { name: 'Green Hills', sky1: '#1a1a3e', sky2: '#2d5a27', ground: '#3a7d2a', groundDark: '#2d6120', groundAccent: '#4a9d3a', particle: '#5ab340' },
+    { name: 'Desert', sky1: '#2a1a0a', sky2: '#c4853c', ground: '#c4a243', groundDark: '#a88830', groundAccent: '#d4b253', particle: '#dac070' },
+    { name: 'Snow Mountains', sky1: '#0a1a3a', sky2: '#4a6a9a', ground: '#dde8f0', groundDark: '#b8c8d8', groundAccent: '#eef4f8', particle: '#ffffff' },
+    { name: 'Volcanic', sky1: '#1a0000', sky2: '#3a1010', ground: '#2a2020', groundDark: '#1a1212', groundAccent: '#3a2a2a', particle: '#ff4400' }
+];
+
+const AMMO_TYPES = [
+    { name: 'Standard', key: '1', radius: 30, damage: 25, count: Infinity, color: '#ff0' },
+    { name: 'Big Bomb', key: '2', radius: 60, damage: 45, count: 3, color: '#f50' },
+    { name: 'Cluster', key: '3', radius: 20, damage: 15, count: 2, color: '#0ff', cluster: true },
+    { name: 'Bouncer', key: '4', radius: 25, damage: 20, count: 3, color: '#0f0', bounces: 1 },
+    { name: 'Napalm', key: '5', radius: 15, damage: 8, count: 2, color: '#f80', napalm: true }
+];
+
+// ---- RESIZE ----
+function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W;
+    canvas.height = H;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---- TERRAIN GENERATION ----
+function generateTerrain() {
+    terrainTheme = Math.floor(Math.random() * THEMES.length);
+    terrain = new Array(W * 2);
+    const baseH = H * 0.5;
+    const amp1 = H * 0.15;
+    const amp2 = H * 0.08;
+    const amp3 = H * 0.03;
+    const freq1 = 0.003 + Math.random() * 0.002;
+    const freq2 = 0.008 + Math.random() * 0.005;
+    const freq3 = 0.02 + Math.random() * 0.01;
+    const phase1 = Math.random() * Math.PI * 2;
+    const phase2 = Math.random() * Math.PI * 2;
+    const phase3 = Math.random() * Math.PI * 2;
+
+    for (let x = 0; x < W * 2; x++) {
+        terrain[x] = baseH
+            + Math.sin(x * freq1 + phase1) * amp1
+            + Math.sin(x * freq2 + phase2) * amp2
+            + Math.sin(x * freq3 + phase3) * amp3;
+        terrain[x] = Math.max(H * 0.2, Math.min(H * 0.8, terrain[x]));
+    }
+    // Smooth
+    for (let pass = 0; pass < 3; pass++) {
+        for (let x = 1; x < terrain.length - 1; x++) {
+            terrain[x] = (terrain[x - 1] + terrain[x] + terrain[x + 1]) / 3;
+        }
+    }
+}
+
+function getTerrainY(x) {
+    const ix = Math.floor(x);
+    if (ix < 0 || ix >= terrain.length - 1) return H;
+    const frac = x - ix;
+    return terrain[ix] * (1 - frac) + terrain[ix + 1] * frac;
+}
+
+function deformTerrain(cx, cy, radius) {
+    const theme = THEMES[terrainTheme];
+    for (let x = Math.max(0, Math.floor(cx - radius)); x < Math.min(terrain.length, Math.ceil(cx + radius)); x++) {
+        const dx = x - cx;
+        const maxDepth = Math.sqrt(Math.max(0, radius * radius - dx * dx));
+        const terrainY = terrain[x];
+        const craterTop = cy - maxDepth;
+        const craterBottom = cy + maxDepth;
+        if (terrainY > craterTop && terrainY <= craterBottom) {
+            terrain[x] = craterBottom;
+        } else if (terrainY > craterBottom) {
+            // terrain is below crater, leave it
+        } else {
+            // terrain above crater top - carve it if it extends into crater
+            if (terrainY > craterTop) {
+                terrain[x] = craterBottom;
+            }
+        }
+        // Generate debris particles
+        if (Math.random() < 0.3 && terrain[x] !== terrainY) {
+            particles.push({
+                x: x, y: terrainY,
+                vx: (Math.random() - 0.5) * 6,
+                vy: -Math.random() * 8 - 2,
+                life: 60 + Math.random() * 40,
+                maxLife: 100,
+                size: 2 + Math.random() * 3,
+                color: theme.particle,
+                gravity: true,
+                type: 'debris'
+            });
+        }
+    }
+}
+
+// ---- TANK CREATION ----
+function createTank(playerIndex) {
+    const xMin = playerIndex === 0 ? W * 0.1 : W * 0.6;
+    const xMax = playerIndex === 0 ? W * 0.4 : W * 0.9;
+    const x = xMin + Math.random() * (xMax - xMin);
+    const y = getTerrainY(x);
+    return {
+        x: x,
+        y: y,
+        angle: playerIndex === 0 ? -45 : -135,
+        power: 50,
+        hp: MAX_HP,
+        fuel: MAX_FUEL,
+        ammo: AMMO_TYPES.map(a => a.count),
+        selectedAmmo: 0,
+        color: playerIndex === 0 ? '#4488ff' : '#ff4444',
+        colorDark: playerIndex === 0 ? '#2255bb' : '#bb2222',
+        colorLight: playerIndex === 0 ? '#66aaff' : '#ff6666',
+        name: playerIndex === 0 ? 'Player 1' : (gameMode === '2p' ? 'Player 2' : 'AI'),
+        alive: true,
+        destroyTimer: 0
+    };
+}
+
+// ---- INIT ROUND ----
+function initRound() {
+    generateTerrain();
+    wind = (Math.random() - 0.5) * 0.12;
+    tanks = [createTank(0), createTank(1)];
+    projectiles = [];
+    particles = [];
+    explosions = [];
+    napalmFires = [];
+    smokeTrails = [];
+    currentPlayer = Math.random() < 0.5 ? 0 : 1;
+    turnActive = true;
+    hasFired = false;
+    projectileActive = false;
+    waitingForEffects = false;
+    cameraX = 0;
+    cameraFollowing = false;
+    turnTransitionTimer = 0;
+}
+
+// ---- PROJECTILE ----
+function fireProjectile(tank) {
+    const angleRad = tank.angle * Math.PI / 180;
+    const tipX = tank.x + Math.cos(angleRad) * BARREL_LENGTH;
+    const tipY = tank.y - TANK_HEIGHT + Math.sin(angleRad) * BARREL_LENGTH;
+    const speed = tank.power * 0.12;
+    const ammoType = AMMO_TYPES[tank.selectedAmmo];
+
+    projectiles.push({
+        x: tipX,
+        y: tipY,
+        vx: Math.cos(angleRad) * speed,
+        vy: Math.sin(angleRad) * speed,
+        type: tank.selectedAmmo,
+        bouncesLeft: ammoType.bounces || 0,
+        owner: currentPlayer,
+        trail: [],
+        active: true,
+        splitTimer: ammoType.cluster ? 60 + Math.random() * 30 : 0,
+        isClusterChild: false
+    });
+
+    if (tank.ammo[tank.selectedAmmo] !== Infinity) {
+        tank.ammo[tank.selectedAmmo]--;
+    }
+    hasFired = true;
+    projectileActive = true;
+    playSound('fire');
+}
+
+// ---- EXPLOSION ----
+function createExplosion(x, y, radius, damage, type) {
+    const theme = THEMES[terrainTheme];
+    deformTerrain(x, y, radius);
+
+    explosions.push({
+        x, y, radius, maxRadius: radius,
+        timer: 0, maxTimer: 25,
+        color: type === 4 ? '#ff6600' : '#ffaa00'
+    });
+
+    // Damage tanks
+    for (let t of tanks) {
+        if (!t.alive) continue;
+        const dist = Math.sqrt((t.x - x) ** 2 + ((t.y - TANK_HEIGHT / 2) - y) ** 2);
+        if (dist < radius * 1.5) {
+            const dmgMul = Math.max(0, 1 - dist / (radius * 1.5));
+            const dmg = Math.round(damage * dmgMul);
+            t.hp = Math.max(0, t.hp - dmg);
+            if (t.hp <= 0) {
+                t.alive = false;
+                t.destroyTimer = 120;
+                playSound('destroy');
+                createDestroyParticles(t);
+            }
+        }
+    }
+
+    // Particles
+    const particleCount = Math.floor(radius * 1.5);
+    for (let i = 0; i < particleCount; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const spd = Math.random() * 6 + 2;
+        const colors = ['#ff4400', '#ffaa00', '#ffee00', '#ff6600', theme.particle];
+        particles.push({
+            x, y,
+            vx: Math.cos(ang) * spd,
+            vy: Math.sin(ang) * spd - Math.random() * 3,
+            life: 30 + Math.random() * 40,
+            maxLife: 70,
+            size: 2 + Math.random() * 4,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            gravity: true,
+            type: 'explosion'
+        });
+    }
+
+    // Screen shake
+    shakeAmount = Math.min(radius * 0.3, 15);
+
+    const sizeParam = radius / 30;
+    playSound('explosion', { size: sizeParam });
+
+    // Napalm
+    if (type === 4) {
+        createNapalm(x, y);
+    }
+}
+
+function createNapalm(x, y) {
+    playSound('napalm');
+    for (let i = -8; i <= 8; i++) {
+        const nx = x + i * 12;
+        const ny = getTerrainY(nx);
+        napalmFires.push({
+            x: nx, y: ny,
+            life: 120 + Math.random() * 80,
+            maxLife: 200,
+            damageTimer: 0
+        });
+    }
+}
+
+function createDestroyParticles(tank) {
+    for (let i = 0; i < 40; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const spd = Math.random() * 5 + 1;
+        particles.push({
+            x: tank.x, y: tank.y - TANK_HEIGHT / 2,
+            vx: Math.cos(ang) * spd,
+            vy: Math.sin(ang) * spd - 2,
+            life: 40 + Math.random() * 60,
+            maxLife: 100,
+            size: 3 + Math.random() * 5,
+            color: Math.random() < 0.5 ? tank.color : '#333',
+            gravity: true,
+            type: 'debris'
+        });
+    }
+}
+
+// ---- UPDATE ----
+function updateProjectiles() {
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+        const p = projectiles[i];
+        if (!p.active) continue;
+
+        p.vy += GRAVITY;
+        p.vx += wind;
+        p.x += p.vx;
+        p.y += p.vy;
+
+        // Smoke trail
+        if (Math.random() < 0.6) {
+            smokeTrails.push({
+                x: p.x, y: p.y,
+                size: 2 + Math.random() * 3,
+                life: 20 + Math.random() * 20,
+                maxLife: 40,
+                alpha: 0.5
+            });
+        }
+
+        // Cluster split
+        if (AMMO_TYPES[p.type].cluster && !p.isClusterChild) {
+            p.splitTimer--;
+            if (p.splitTimer <= 0) {
+                for (let j = 0; j < 5; j++) {
+                    projectiles.push({
+                        x: p.x, y: p.y,
+                        vx: p.vx + (Math.random() - 0.5) * 4,
+                        vy: p.vy + (Math.random() - 0.5) * 3 - 1,
+                        type: p.type,
+                        bouncesLeft: 0,
+                        owner: p.owner,
+                        trail: [],
+                        active: true,
+                        splitTimer: 0,
+                        isClusterChild: true
+                    });
+                }
+                p.active = false;
+                continue;
+            }
+        }
+
+        // Terrain collision
+        const ty = getTerrainY(p.x);
+        if (p.y >= ty) {
+            if (p.bouncesLeft > 0) {
+                p.bouncesLeft--;
+                p.y = ty - 1;
+                p.vy = -Math.abs(p.vy) * 0.6;
+                p.vx *= 0.8;
+                playSound('bounce');
+            } else {
+                const ammo = AMMO_TYPES[p.type];
+                createExplosion(p.x, ty, ammo.radius, ammo.damage, p.type);
+                p.active = false;
+            }
+        }
+
+        // Off screen
+        if (p.x < -100 || p.x > W * 2 + 100 || p.y > H + 200) {
+            p.active = false;
+        }
+    }
+
+    projectiles = projectiles.filter(p => p.active);
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life--;
+        if (p.life <= 0) { particles.splice(i, 1); continue; }
+        if (p.gravity) {
+            p.vy += 0.1;
+        }
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vx *= 0.99;
+    }
+}
+
+function updateSmokeTrails() {
+    for (let i = smokeTrails.length - 1; i >= 0; i--) {
+        const s = smokeTrails[i];
+        s.life--;
+        s.size += 0.1;
+        s.alpha = s.life / s.maxLife * 0.3;
+        if (s.life <= 0) smokeTrails.splice(i, 1);
+    }
+}
+
+function updateExplosions() {
+    for (let i = explosions.length - 1; i >= 0; i--) {
+        const e = explosions[i];
+        e.timer++;
+        if (e.timer >= e.maxTimer) explosions.splice(i, 1);
+    }
+}
+
+function updateNapalmFires() {
+    for (let i = napalmFires.length - 1; i >= 0; i--) {
+        const f = napalmFires[i];
+        f.life--;
+        f.y = getTerrainY(f.x);
+        f.damageTimer++;
+
+        // Damage tanks every 30 frames
+        if (f.damageTimer % 30 === 0) {
+            for (let t of tanks) {
+                if (!t.alive) continue;
+                const dist = Math.abs(t.x - f.x);
+                if (dist < 20) {
+                    t.hp = Math.max(0, t.hp - 3);
+                    if (t.hp <= 0) {
+                        t.alive = false;
+                        t.destroyTimer = 120;
+                        playSound('destroy');
+                        createDestroyParticles(t);
+                    }
+                }
+            }
+        }
+
+        // Fire particles
+        if (Math.random() < 0.3) {
+            particles.push({
+                x: f.x + (Math.random() - 0.5) * 10,
+                y: f.y,
+                vx: (Math.random() - 0.5) * 1,
+                vy: -Math.random() * 3 - 1,
+                life: 15 + Math.random() * 15,
+                maxLife: 30,
+                size: 2 + Math.random() * 3,
+                color: Math.random() < 0.5 ? '#ff4400' : '#ff8800',
+                gravity: false,
+                type: 'fire'
+            });
+        }
+
+        // Small terrain deformation
+        if (f.damageTimer % 60 === 0) {
+            deformTerrain(f.x, f.y, 5);
+        }
+
+        if (f.life <= 0) napalmFires.splice(i, 1);
+    }
+}
+
+function updateTanks() {
+    for (let t of tanks) {
+        if (t.alive) {
+            t.y = getTerrainY(t.x);
+        } else if (t.destroyTimer > 0) {
+            t.destroyTimer--;
+        }
+    }
+}
+
+function updateCamera() {
+    if (cameraFollowing && followTarget) {
+        cameraTargetX = followTarget.x - W / 2;
+    } else {
+        const tank = tanks[currentPlayer];
+        if (tank) cameraTargetX = tank.x - W / 2;
+    }
+    cameraTargetX = Math.max(0, Math.min(W, cameraTargetX));
+    cameraX += (cameraTargetX - cameraX) * 0.05;
+
+    // Shake
+    if (shakeAmount > 0.5) {
+        shakeAmount *= shakeDecay;
+    } else {
+        shakeAmount = 0;
+    }
+}
+
+// ---- AI ----
+function calculateAIShot() {
+    const aiTank = tanks[1];
+    const targetTank = tanks[0];
+    const dx = targetTank.x - aiTank.x;
+    const dy = (targetTank.y - TANK_HEIGHT / 2) - (aiTank.y - TANK_HEIGHT);
+
+    let bestAngle, bestPower;
+
+    if (aiDifficulty === 'easy') {
+        bestAngle = -45 + (Math.random() - 0.5) * 60;
+        if (dx < 0) bestAngle = -135 + (Math.random() - 0.5) * 60;
+        bestPower = 40 + Math.random() * 50;
+    } else {
+        // Simulate shots to find best
+        let bestDist = Infinity;
+        bestAngle = -90;
+        bestPower = 50;
+
+        const angleRange = aiDifficulty === 'hard' ? 3 : 10;
+        const powerRange = aiDifficulty === 'hard' ? 3 : 8;
+        const iterations = aiDifficulty === 'hard' ? 200 : 80;
+
+        for (let iter = 0; iter < iterations; iter++) {
+            const testAngle = -180 + Math.random() * 180;
+            const testPower = POWER_MIN + Math.random() * (POWER_MAX - POWER_MIN);
+            const speed = testPower * 0.12;
+            const rad = testAngle * Math.PI / 180;
+            let sx = aiTank.x + Math.cos(rad) * BARREL_LENGTH;
+            let sy = aiTank.y - TANK_HEIGHT + Math.sin(rad) * BARREL_LENGTH;
+            let svx = Math.cos(rad) * speed;
+            let svy = Math.sin(rad) * speed;
+
+            for (let step = 0; step < 500; step++) {
+                svy += GRAVITY;
+                svx += wind;
+                sx += svx;
+                sy += svy;
+                const ty = getTerrainY(sx);
+                if (sy >= ty || sy > H + 100 || sx < -100 || sx > W * 2 + 100) {
+                    const hitX = sx;
+                    const hitY = Math.min(sy, ty);
+                    const dist = Math.sqrt((hitX - targetTank.x) ** 2 + (hitY - targetTank.y) ** 2);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestAngle = testAngle;
+                        bestPower = testPower;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Add variance based on difficulty
+        const variance = aiDifficulty === 'hard' ? 3 : 12;
+        bestAngle += (Math.random() - 0.5) * variance;
+        bestPower += (Math.random() - 0.5) * variance;
+    }
+
+    bestPower = Math.max(POWER_MIN, Math.min(POWER_MAX, bestPower));
+
+    // Select ammo (AI uses special ammo sometimes)
+    let ammoChoice = 0;
+    if (aiDifficulty !== 'easy' && Math.random() < 0.3) {
+        const available = [];
+        for (let i = 1; i < AMMO_TYPES.length; i++) {
+            if (aiTank.ammo[i] > 0) available.push(i);
+        }
+        if (available.length > 0) {
+            ammoChoice = available[Math.floor(Math.random() * available.length)];
+        }
+    }
+
+    return { angle: bestAngle, power: bestPower, ammo: ammoChoice };
+}
+
+function processAI() {
+    if (!aiThinking) return;
+    aiThinkTimer--;
+    if (aiThinkTimer <= 0) {
+        if (!aiAction) {
+            aiAction = calculateAIShot();
+            aiThinkTimer = 30;
+        } else {
+            // Apply action
+            const t = tanks[1];
+            t.angle = aiAction.angle;
+            t.power = aiAction.power;
+            t.selectedAmmo = aiAction.ammo;
+            fireProjectile(t);
+            aiThinking = false;
+            aiAction = null;
+            cameraFollowing = true;
+            followTarget = projectiles[projectiles.length - 1];
+        }
+    }
+}
+
+// ---- INPUT ----
+document.addEventListener('keydown', (e) => {
+    keys[e.key] = true;
+    ensureAudio();
+
+    if (gameState === 'menu') {
+        handleMenuInput(e.key);
+        e.preventDefault();
+        return;
+    }
+
+    if (gameState === 'roundEnd' || gameState === 'matchEnd') {
+        if (e.key === ' ' || e.key === 'Enter') {
+            if (gameState === 'roundEnd') {
+                currentRound++;
+                if (currentRound < BEST_OF && roundScores[0] < ROUNDS_TO_WIN && roundScores[1] < ROUNDS_TO_WIN) {
+                    initRound();
+                    gameState = 'playing';
+                } else {
+                    gameState = 'matchEnd';
+                    matchEndTimer = 0;
+                }
+            } else {
+                gameState = 'menu';
+            }
+        }
+        e.preventDefault();
+        return;
+    }
+
+    if (gameState === 'playing' && turnActive && !hasFired && currentPlayer === 0 || (gameState === 'playing' && turnActive && !hasFired && gameMode === '2p')) {
+        const tank = tanks[currentPlayer];
+        if (gameMode === '1p' && currentPlayer === 1) return;
+
+        if (e.key === ' ') {
+            fireProjectile(tank);
+            cameraFollowing = true;
+            followTarget = projectiles[projectiles.length - 1];
+            e.preventDefault();
+        }
+        if (e.key >= '1' && e.key <= '5') {
+            const idx = parseInt(e.key) - 1;
+            if (idx < AMMO_TYPES.length && tank.ammo[idx] > 0) {
+                tank.selectedAmmo = idx;
+                playSound('select');
+            }
+            e.preventDefault();
+        }
+    }
+
+    e.preventDefault();
+});
+
+document.addEventListener('keyup', (e) => {
+    keys[e.key] = false;
+});
+
+function handleMenuInput(key) {
+    if (key === 'ArrowLeft' || key === 'ArrowRight') {
+        playSound('select');
+        if (menuSelection === 'mode') {
+            selectedMode = selectedMode === 0 ? 1 : 0;
+        } else if (menuSelection === 'difficulty') {
+            selectedDifficulty = (selectedDifficulty + (key === 'ArrowRight' ? 1 : -1) + 3) % 3;
+        }
+    }
+    if (key === 'ArrowUp' || key === 'ArrowDown') {
+        playSound('select');
+        const items = selectedMode === 0 ? ['mode', 'difficulty', 'start'] : ['mode', 'start'];
+        const idx = items.indexOf(menuSelection);
+        const dir = key === 'ArrowDown' ? 1 : -1;
+        const newIdx = (idx + dir + items.length) % items.length;
+        menuSelection = items[newIdx];
+    }
+    if (key === 'Enter' || key === ' ') {
+        if (menuSelection === 'start' || menuSelection === 'mode' && false) {
+            gameMode = selectedMode === 0 ? '1p' : '2p';
+            aiDifficulty = ['easy', 'medium', 'hard'][selectedDifficulty];
+            roundScores = [0, 0];
+            currentRound = 0;
+            initRound();
+            gameState = 'playing';
+            playSound('fire');
+        }
+    }
+}
+
+function handlePlayingInput() {
+    if (!turnActive || hasFired) return;
+    if (gameMode === '1p' && currentPlayer === 1) return;
+
+    const tank = tanks[currentPlayer];
+    const angleSpeed = 1;
+    const powerSpeed = 0.8;
+
+    if (keys['ArrowLeft']) {
+        tank.angle -= angleSpeed;
+    }
+    if (keys['ArrowRight']) {
+        tank.angle += angleSpeed;
+    }
+    // Clamp angle
+    tank.angle = Math.max(-180, Math.min(0, tank.angle));
+
+    if (keys['ArrowUp']) {
+        tank.power = Math.min(POWER_MAX, tank.power + powerSpeed);
+    }
+    if (keys['ArrowDown']) {
+        tank.power = Math.max(POWER_MIN, tank.power - powerSpeed);
+    }
+
+    if (keys['a'] || keys['A']) {
+        if (tank.fuel > 0) {
+            tank.x -= MOVE_SPEED;
+            tank.fuel -= 0.5;
+            tank.x = Math.max(20, tank.x);
+            tank.y = getTerrainY(tank.x);
+        }
+    }
+    if (keys['d'] || keys['D']) {
+        if (tank.fuel > 0) {
+            tank.x += MOVE_SPEED;
+            tank.fuel -= 0.5;
+            tank.x = Math.min(W * 2 - 20, tank.x);
+            tank.y = getTerrainY(tank.x);
+        }
+    }
+}
+
+// ---- TURN MANAGEMENT ----
+function nextTurn() {
+    // Check for round end
+    if (!tanks[0].alive || !tanks[1].alive) {
+        if (!tanks[0].alive && !tanks[1].alive) {
+            // Draw - no score
+        } else if (!tanks[0].alive) {
+            roundScores[1]++;
+        } else {
+            roundScores[0]++;
+        }
+        gameState = 'roundEnd';
+        roundEndTimer = 0;
+        if (roundScores[0] >= ROUNDS_TO_WIN || roundScores[1] >= ROUNDS_TO_WIN) {
+            playSound('win');
+        }
+        return;
+    }
+
+    currentPlayer = 1 - currentPlayer;
+    wind += (Math.random() - 0.5) * 0.04;
+    wind = Math.max(-0.15, Math.min(0.15, wind));
+    hasFired = false;
+    projectileActive = false;
+    turnActive = true;
+    cameraFollowing = false;
+    tanks[currentPlayer].fuel = MAX_FUEL;
+
+    // Start AI turn
+    if (gameMode === '1p' && currentPlayer === 1) {
+        aiThinking = true;
+        aiThinkTimer = 40;
+        aiAction = null;
+    }
+}
+
+// ---- DRAWING ----
+function drawSky() {
+    const theme = THEMES[terrainTheme];
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, theme.sky1);
+    grad.addColorStop(1, theme.sky2);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stars (visible in darker themes)
+    if (terrainTheme === 0 || terrainTheme === 3) {
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        const seed = terrainTheme * 1000;
+        for (let i = 0; i < 60; i++) {
+            const sx = ((seed + i * 137) % W);
+            const sy = ((seed + i * 251) % (H * 0.4));
+            ctx.fillRect(sx, sy, 1.5, 1.5);
+        }
+    }
+}
+
+function drawTerrain() {
+    const theme = THEMES[terrainTheme];
+    ctx.save();
+    ctx.translate(-cameraX, 0);
+
+    // Main terrain fill
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x < terrain.length; x += 2) {
+        ctx.lineTo(x, terrain[x]);
+    }
+    ctx.lineTo(terrain.length, H);
+    ctx.closePath();
+
+    const grad = ctx.createLinearGradient(0, H * 0.3, 0, H);
+    grad.addColorStop(0, theme.ground);
+    grad.addColorStop(0.3, theme.groundDark);
+    grad.addColorStop(1, theme.groundDark);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Surface line
+    ctx.beginPath();
+    ctx.moveTo(0, terrain[0]);
+    for (let x = 1; x < terrain.length; x += 2) {
+        ctx.lineTo(x, terrain[x]);
+    }
+    ctx.strokeStyle = theme.groundAccent;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+function drawTank(tank) {
+    if (!tank.alive && tank.destroyTimer <= 0) return;
+    ctx.save();
+    ctx.translate(tank.x - cameraX, tank.y);
+
+    if (!tank.alive) {
+        // Destroyed tank
+        const alpha = tank.destroyTimer / 120;
+        ctx.globalAlpha = alpha;
+    }
+
+    // Calculate terrain slope for tank tilt
+    const slopeL = getTerrainY(tank.x - 10);
+    const slopeR = getTerrainY(tank.x + 10);
+    const tiltAngle = Math.atan2(slopeR - slopeL, 20);
+    ctx.rotate(tiltAngle);
+
+    // Treads
+    ctx.fillStyle = '#333';
+    ctx.fillRect(-TANK_WIDTH / 2, -6, TANK_WIDTH, 8);
+    ctx.fillStyle = '#555';
+    for (let i = 0; i < 6; i++) {
+        ctx.fillRect(-TANK_WIDTH / 2 + 3 + i * 7, -5, 4, 6);
+    }
+
+    // Body
+    ctx.fillStyle = tank.colorDark;
+    ctx.beginPath();
+    ctx.moveTo(-TANK_WIDTH / 2 + 4, -6);
+    ctx.lineTo(TANK_WIDTH / 2 - 4, -6);
+    ctx.lineTo(TANK_WIDTH / 2 - 8, -TANK_HEIGHT + 4);
+    ctx.lineTo(-TANK_WIDTH / 2 + 8, -TANK_HEIGHT + 4);
+    ctx.closePath();
+    ctx.fill();
+
+    // Turret
+    ctx.fillStyle = tank.color;
+    ctx.beginPath();
+    ctx.arc(0, -TANK_HEIGHT + 2, 10, Math.PI, 0);
+    ctx.fill();
+
+    // Barrel
+    ctx.save();
+    ctx.translate(0, -TANK_HEIGHT + 2);
+    ctx.rotate((tank.angle - (tiltAngle * 180 / Math.PI)) * Math.PI / 180);
+    ctx.fillStyle = tank.colorLight;
+    ctx.fillRect(0, -2.5, BARREL_LENGTH, 5);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(BARREL_LENGTH - 3, -3, 3, 6);
+    ctx.restore();
+
+    // Highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(-TANK_WIDTH / 2 + 10, -TANK_HEIGHT + 5, TANK_WIDTH - 24, 4);
+
+    ctx.restore();
+}
+
+function drawProjectiles() {
+    ctx.save();
+    ctx.translate(-cameraX, 0);
+    for (let p of projectiles) {
+        const ammo = AMMO_TYPES[p.type];
+        ctx.fillStyle = ammo.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.isClusterChild ? 3 : 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Glow
+        ctx.shadowColor = ammo.color;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+}
+
+function drawSmokeTrails() {
+    ctx.save();
+    ctx.translate(-cameraX, 0);
+    for (let s of smokeTrails) {
+        ctx.fillStyle = `rgba(200,200,200,${s.alpha})`;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawExplosions() {
+    ctx.save();
+    ctx.translate(-cameraX, 0);
+    for (let e of explosions) {
+        const progress = e.timer / e.maxTimer;
+        const r = e.maxRadius * (0.3 + progress * 0.7);
+        const alpha = 1 - progress;
+
+        // Outer glow
+        const grad = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
+        grad.addColorStop(0, `rgba(255,255,200,${alpha})`);
+        grad.addColorStop(0.3, `rgba(255,160,0,${alpha * 0.8})`);
+        grad.addColorStop(0.7, `rgba(255,60,0,${alpha * 0.4})`);
+        grad.addColorStop(1, `rgba(255,0,0,0)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawParticles() {
+    ctx.save();
+    ctx.translate(-cameraX, 0);
+    for (let p of particles) {
+        const alpha = p.life / p.maxLife;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+}
+
+function drawNapalmFires() {
+    ctx.save();
+    ctx.translate(-cameraX, 0);
+    for (let f of napalmFires) {
+        const alpha = f.life / f.maxLife;
+        const flicker = 0.5 + Math.random() * 0.5;
+
+        ctx.fillStyle = `rgba(255,100,0,${alpha * flicker * 0.6})`;
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = `rgba(255,200,0,${alpha * flicker * 0.3})`;
+        ctx.beginPath();
+        ctx.arc(f.x, f.y - 5, 5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawHUD() {
+    const tank = tanks[currentPlayer];
+    const padding = 15;
+
+    // Turn indicator
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(W / 2 - 120, 8, 240, 36);
+    ctx.strokeStyle = tank ? tank.color : '#fff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(W / 2 - 120, 8, 240, 36);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 16px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    const turnText = (gameMode === '1p' && currentPlayer === 1) ? "AI's Turn" : `${tanks[currentPlayer].name}'s Turn`;
+    ctx.fillText(turnText, W / 2, 31);
+
+    // HP bars
+    for (let i = 0; i < 2; i++) {
+        const t = tanks[i];
+        const bx = i === 0 ? padding : W - padding - 200;
+        const by = 55;
+
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(bx - 5, by - 5, 210, 50);
+
+        ctx.fillStyle = t.color;
+        ctx.font = 'bold 14px "Segoe UI", Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(t.name, bx, by + 12);
+
+        // HP bar background
+        ctx.fillStyle = '#333';
+        ctx.fillRect(bx, by + 18, 200, 14);
+
+        // HP bar
+        const hpFrac = t.hp / MAX_HP;
+        const hpColor = hpFrac > 0.5 ? '#0f0' : hpFrac > 0.25 ? '#ff0' : '#f00';
+        ctx.fillStyle = hpColor;
+        ctx.fillRect(bx, by + 18, 200 * hpFrac, 14);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '11px "Segoe UI", Arial';
+        ctx.fillText(`${t.hp} HP`, bx + 5, by + 30);
+
+        // Round wins
+        ctx.fillStyle = '#aaa';
+        ctx.font = '11px "Segoe UI", Arial';
+        ctx.fillText(`Wins: ${roundScores[i]}`, bx + 150, by + 12);
+    }
+
+    // Current player controls info
+    if (turnActive && !hasFired && tank) {
+        const cx = W / 2;
+        const cy = H - 120;
+
+        // Control panel background
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(cx - 250, cy - 10, 500, 115);
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(cx - 250, cy - 10, 500, 115);
+
+        // Angle
+        ctx.fillStyle = '#ccc';
+        ctx.font = '13px "Segoe UI", Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(`Angle: ${Math.round(tank.angle)}deg`, cx - 230, cy + 15);
+
+        // Power meter
+        ctx.fillText('Power:', cx - 230, cy + 40);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(cx - 170, cy + 28, 150, 16);
+        const powerFrac = (tank.power - POWER_MIN) / (POWER_MAX - POWER_MIN);
+        const pGrad = ctx.createLinearGradient(cx - 170, 0, cx - 20, 0);
+        pGrad.addColorStop(0, '#0a0');
+        pGrad.addColorStop(0.5, '#ff0');
+        pGrad.addColorStop(1, '#f00');
+        ctx.fillStyle = pGrad;
+        ctx.fillRect(cx - 170, cy + 28, 150 * powerFrac, 16);
+        ctx.fillStyle = '#fff';
+        ctx.font = '11px "Segoe UI", Arial';
+        ctx.fillText(`${Math.round(tank.power)}%`, cx - 15, cy + 41);
+
+        // Fuel
+        ctx.fillStyle = '#ccc';
+        ctx.font = '13px "Segoe UI", Arial';
+        ctx.fillText(`Fuel: ${Math.round(tank.fuel)}`, cx - 230, cy + 65);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(cx - 170, cy + 53, 80, 12);
+        ctx.fillStyle = '#38f';
+        ctx.fillRect(cx - 170, cy + 53, 80 * (tank.fuel / MAX_FUEL), 12);
+
+        // Ammo selection
+        ctx.font = '12px "Segoe UI", Arial';
+        const ammoY = cy + 85;
+        for (let i = 0; i < AMMO_TYPES.length; i++) {
+            const ax = cx - 230 + i * 95;
+            const ammo = AMMO_TYPES[i];
+            const selected = tank.selectedAmmo === i;
+            const available = tank.ammo[i] > 0;
+
+            ctx.fillStyle = selected ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.3)';
+            ctx.fillRect(ax, ammoY - 12, 88, 20);
+            if (selected) {
+                ctx.strokeStyle = ammo.color;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(ax, ammoY - 12, 88, 20);
+            }
+
+            ctx.fillStyle = available ? ammo.color : '#555';
+            ctx.textAlign = 'left';
+            const countText = ammo.count === Infinity ? 'Inf' : `x${tank.ammo[i]}`;
+            ctx.fillText(`[${ammo.key}]${ammo.name} ${countText}`, ax + 4, ammoY + 2);
+        }
+    }
+
+    // Wind indicator
+    const windX = W / 2;
+    const windY = 55;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(windX - 60, windY - 5, 120, 30);
+    ctx.fillStyle = '#adf';
+    ctx.font = '12px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('WIND', windX, windY + 8);
+
+    // Wind arrow
+    const windStrength = wind * 500;
+    const arrowLen = Math.abs(windStrength) * 0.8;
+    if (Math.abs(windStrength) > 1) {
+        ctx.strokeStyle = '#adf';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(windX - arrowLen, windY + 18);
+        ctx.lineTo(windX + arrowLen, windY + 18);
+        ctx.stroke();
+
+        // Arrow head
+        const dir = windStrength > 0 ? 1 : -1;
+        ctx.beginPath();
+        ctx.moveTo(windX + arrowLen, windY + 18);
+        ctx.lineTo(windX + arrowLen - dir * 8, windY + 13);
+        ctx.lineTo(windX + arrowLen - dir * 8, windY + 23);
+        ctx.closePath();
+        ctx.fillStyle = '#adf';
+        ctx.fill();
+    } else {
+        ctx.fillStyle = '#adf';
+        ctx.fillText('Calm', windX, windY + 22);
+    }
+
+    // Round info
+    ctx.fillStyle = '#aaa';
+    ctx.font = '12px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Round ${currentRound + 1} of ${BEST_OF}`, W / 2, H - 10);
+}
+
+function drawAimGuide() {
+    if (!turnActive || hasFired) return;
+    if (gameMode === '1p' && currentPlayer === 1) return;
+
+    const tank = tanks[currentPlayer];
+    const angleRad = tank.angle * Math.PI / 180;
+    const tipX = tank.x + Math.cos(angleRad) * BARREL_LENGTH - cameraX;
+    const tipY = tank.y - TANK_HEIGHT + Math.sin(angleRad) * BARREL_LENGTH;
+
+    // Dotted aim line
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    const lineLen = 50;
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(tipX + Math.cos(angleRad) * lineLen, tipY + Math.sin(angleRad) * lineLen);
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+// ---- MENU SCREEN ----
+function drawMenu() {
+    // Background
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#0a0a2a');
+    grad.addColorStop(1, '#1a0a0a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Decorative tanks
+    drawMenuTank(W * 0.2, H * 0.6, '#4488ff', -30);
+    drawMenuTank(W * 0.8, H * 0.6, '#ff4444', -150);
+
+    // Explosion particles decoration
+    const time = Date.now() * 0.001;
+    for (let i = 0; i < 20; i++) {
+        const px = W / 2 + Math.sin(time + i * 0.7) * 200;
+        const py = H * 0.35 + Math.cos(time + i * 0.5) * 30;
+        const alpha = 0.2 + Math.sin(time * 2 + i) * 0.15;
+        ctx.fillStyle = `rgba(255,${100 + i * 5},0,${alpha})`;
+        ctx.beginPath();
+        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Title
+    ctx.textAlign = 'center';
+
+    // Title shadow
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 64px "Segoe UI", Arial';
+    ctx.fillText('TANK WARS', W / 2 + 3, H * 0.2 + 3);
+
+    // Title gradient
+    const titleGrad = ctx.createLinearGradient(W / 2 - 200, 0, W / 2 + 200, 0);
+    titleGrad.addColorStop(0, '#ff4444');
+    titleGrad.addColorStop(0.5, '#ffaa00');
+    titleGrad.addColorStop(1, '#ff4444');
+    ctx.fillStyle = titleGrad;
+    ctx.font = 'bold 64px "Segoe UI", Arial';
+    ctx.fillText('TANK WARS', W / 2, H * 0.2);
+
+    // Subtitle
+    ctx.fillStyle = '#888';
+    ctx.font = '16px "Segoe UI", Arial';
+    ctx.fillText('Best of 3 Rounds - Destroy Your Opponent!', W / 2, H * 0.2 + 35);
+
+    // Menu options
+    const menuY = H * 0.4;
+    const spacing = 60;
+
+    // Mode select
+    const modeHighlight = menuSelection === 'mode';
+    ctx.fillStyle = modeHighlight ? '#fff' : '#888';
+    ctx.font = `${modeHighlight ? 'bold ' : ''}20px "Segoe UI", Arial`;
+    ctx.fillText('GAME MODE', W / 2, menuY);
+
+    const modes = ['1 Player vs AI', '2 Players Local'];
+    for (let i = 0; i < 2; i++) {
+        const mx = W / 2 + (i - 0.5) * 200;
+        const selected = selectedMode === i;
+        ctx.fillStyle = selected ? (modeHighlight ? '#ffaa00' : '#aa7700') : '#555';
+        ctx.font = `${selected ? 'bold ' : ''}18px "Segoe UI", Arial`;
+        ctx.fillText(modes[i], mx, menuY + 30);
+        if (selected && modeHighlight) {
+            ctx.fillStyle = '#ffaa00';
+            ctx.fillText('<  ' + modes[i] + '  >', mx, menuY + 30);
+        }
+    }
+
+    // Difficulty (only for 1P)
+    if (selectedMode === 0) {
+        const diffHighlight = menuSelection === 'difficulty';
+        ctx.fillStyle = diffHighlight ? '#fff' : '#888';
+        ctx.font = `${diffHighlight ? 'bold ' : ''}20px "Segoe UI", Arial`;
+        ctx.fillText('AI DIFFICULTY', W / 2, menuY + spacing);
+
+        const diffs = ['Easy', 'Medium', 'Hard'];
+        const diffColors = ['#0f0', '#ff0', '#f00'];
+        for (let i = 0; i < 3; i++) {
+            const dx = W / 2 + (i - 1) * 140;
+            const selected = selectedDifficulty === i;
+            ctx.fillStyle = selected ? (diffHighlight ? diffColors[i] : '#777') : '#444';
+            ctx.font = `${selected ? 'bold ' : ''}18px "Segoe UI", Arial`;
+            ctx.fillText(diffs[i], dx, menuY + spacing + 30);
+            if (selected && diffHighlight) {
+                ctx.fillText('<  ' + diffs[i] + '  >', dx, menuY + spacing + 30);
+            }
+        }
+    }
+
+    // Start
+    const startY = selectedMode === 0 ? menuY + spacing * 2 + 20 : menuY + spacing + 20;
+    const startHighlight = menuSelection === 'start';
+    ctx.fillStyle = startHighlight ? '#ffaa00' : '#666';
+    ctx.font = `bold ${startHighlight ? 28 : 24}px "Segoe UI", Arial`;
+    const pulse = startHighlight ? Math.sin(Date.now() * 0.005) * 0.15 + 0.85 : 1;
+    ctx.globalAlpha = pulse;
+    ctx.fillText('>>> START GAME <<<', W / 2, startY);
+    ctx.globalAlpha = 1;
+
+    // Controls help
+    ctx.fillStyle = '#555';
+    ctx.font = '13px "Segoe UI", Arial';
+    ctx.fillText('Arrow Keys: Navigate   |   Enter/Space: Select', W / 2, H * 0.88);
+    ctx.fillText('In-game: Arrows = Aim/Power  |  A/D = Move  |  Space = Fire  |  1-5 = Ammo', W / 2, H * 0.92);
+}
+
+function drawMenuTank(x, y, color, angle) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Simple tank drawing
+    ctx.fillStyle = '#333';
+    ctx.fillRect(-20, -3, 40, 8);
+
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(-16, -3);
+    ctx.lineTo(16, -3);
+    ctx.lineTo(12, -14);
+    ctx.lineTo(-12, -14);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(0, -14, 8, Math.PI, 0);
+    ctx.fill();
+
+    const rad = angle * Math.PI / 180;
+    ctx.save();
+    ctx.translate(0, -14);
+    ctx.rotate(rad);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, -2, 22, 4);
+    ctx.restore();
+
+    ctx.restore();
+}
+
+// ---- ROUND END SCREEN ----
+function drawRoundEnd() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px "Segoe UI", Arial';
+
+    let msg;
+    if (!tanks[0].alive && !tanks[1].alive) {
+        msg = "It's a Draw!";
+    } else if (!tanks[0].alive) {
+        msg = `${tanks[1].name} Wins the Round!`;
+        ctx.fillStyle = tanks[1].color;
+    } else {
+        msg = `${tanks[0].name} Wins the Round!`;
+        ctx.fillStyle = tanks[0].color;
+    }
+    ctx.fillText(msg, W / 2, H * 0.35);
+
+    // Scores
+    ctx.fillStyle = '#fff';
+    ctx.font = '24px "Segoe UI", Arial';
+    ctx.fillText(`${tanks[0].name}: ${roundScores[0]}  -  ${tanks[1].name}: ${roundScores[1]}`, W / 2, H * 0.45);
+
+    // Check if match is over
+    if (roundScores[0] >= ROUNDS_TO_WIN || roundScores[1] >= ROUNDS_TO_WIN) {
+        const winner = roundScores[0] >= ROUNDS_TO_WIN ? tanks[0] : tanks[1];
+        ctx.fillStyle = winner.color;
+        ctx.font = 'bold 42px "Segoe UI", Arial';
+        ctx.fillText(`${winner.name} WINS THE MATCH!`, W / 2, H * 0.55);
+        ctx.fillStyle = '#aaa';
+        ctx.font = '18px "Segoe UI", Arial';
+        ctx.fillText('Press Space or Enter to return to menu', W / 2, H * 0.65);
+        gameState = 'matchEnd';
+    } else {
+        ctx.fillStyle = '#aaa';
+        ctx.font = '18px "Segoe UI", Arial';
+        ctx.fillText('Press Space or Enter for next round', W / 2, H * 0.55);
+    }
+}
+
+function drawMatchEnd() {
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    const winner = roundScores[0] >= ROUNDS_TO_WIN ? tanks[0] : tanks[1];
+
+    // Victory particles
+    const time = Date.now() * 0.001;
+    for (let i = 0; i < 30; i++) {
+        const px = W / 2 + Math.sin(time * 2 + i * 0.8) * (100 + i * 8);
+        const py = H * 0.3 + Math.cos(time * 1.5 + i * 0.6) * 40;
+        const colors = ['#ff0', '#f80', '#0ff', '#f0f', '#0f0'];
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.globalAlpha = 0.5 + Math.sin(time * 3 + i) * 0.3;
+        ctx.beginPath();
+        ctx.arc(px, py, 3 + Math.sin(time + i) * 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = winner.color;
+    ctx.font = 'bold 48px "Segoe UI", Arial';
+    ctx.fillText(`${winner.name} WINS!`, W / 2, H * 0.38);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '28px "Segoe UI", Arial';
+    ctx.fillText(`Final Score: ${roundScores[0]} - ${roundScores[1]}`, W / 2, H * 0.48);
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '18px "Segoe UI", Arial';
+    ctx.fillText('Press Space or Enter to return to menu', W / 2, H * 0.58);
+}
+
+// ---- TRAJECTORY PREVIEW (faint dots) ----
+function drawTrajectoryPreview() {
+    if (!turnActive || hasFired) return;
+    if (gameMode === '1p' && currentPlayer === 1) return;
+
+    const tank = tanks[currentPlayer];
+    const angleRad = tank.angle * Math.PI / 180;
+    const speed = tank.power * 0.12;
+    let px = tank.x + Math.cos(angleRad) * BARREL_LENGTH;
+    let py = tank.y - TANK_HEIGHT + Math.sin(angleRad) * BARREL_LENGTH;
+    let vx = Math.cos(angleRad) * speed;
+    let vy = Math.sin(angleRad) * speed;
+
+    ctx.save();
+    ctx.translate(-cameraX, 0);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+
+    for (let i = 0; i < 40; i++) {
+        vy += GRAVITY;
+        vx += wind;
+        px += vx;
+        py += vy;
+
+        if (py > getTerrainY(px) || py > H + 50) break;
+        if (i % 3 === 0) {
+            ctx.beginPath();
+            ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+    ctx.restore();
+}
+
+// ---- MAIN LOOP ----
+function update() {
+    if (gameState === 'playing') {
+        handlePlayingInput();
+        updateProjectiles();
+        updateParticles();
+        updateSmokeTrails();
+        updateExplosions();
+        updateNapalmFires();
+        updateTanks();
+        updateCamera();
+
+        if (gameMode === '1p' && currentPlayer === 1) {
+            processAI();
+        }
+
+        // Check if projectiles done
+        if (hasFired && projectiles.length === 0 && explosions.length === 0) {
+            if (napalmFires.length === 0 || waitingForEffects) {
+                if (!waitingForEffects && napalmFires.length > 0) {
+                    waitingForEffects = true;
+                } else if (napalmFires.length === 0 || turnTransitionTimer > 180) {
+                    if (turnTransitionTimer === 0) {
+                        turnTransitionTimer = 1;
+                        cameraFollowing = false;
+                    }
+                    turnTransitionTimer++;
+                    if (turnTransitionTimer > 40) {
+                        turnTransitionTimer = 0;
+                        waitingForEffects = false;
+                        nextTurn();
+                    }
+                }
+            } else {
+                // Wait for napalm but with timeout
+                turnTransitionTimer++;
+                if (turnTransitionTimer > 300) {
+                    napalmFires = [];
+                    turnTransitionTimer = 0;
+                    waitingForEffects = false;
+                    nextTurn();
+                }
+            }
+        } else if (hasFired && projectiles.length === 0 && explosions.length === 0 && napalmFires.length === 0) {
+            // No active effects, proceed to next turn
+            if (turnTransitionTimer === 0) turnTransitionTimer = 1;
+            turnTransitionTimer++;
+            if (turnTransitionTimer > 40) {
+                turnTransitionTimer = 0;
+                nextTurn();
+            }
+        }
+
+        // Camera follow projectile
+        if (cameraFollowing && projectiles.length > 0) {
+            followTarget = projectiles[projectiles.length - 1];
+        } else if (projectiles.length === 0) {
+            cameraFollowing = false;
+        }
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    if (gameState === 'menu') {
+        backLink.style.display = 'block';
+        drawMenu();
+        return;
+    }
+
+    backLink.style.display = 'none';
+
+    // Apply screen shake
+    ctx.save();
+    if (shakeAmount > 0) {
+        ctx.translate(
+            (Math.random() - 0.5) * shakeAmount * 2,
+            (Math.random() - 0.5) * shakeAmount * 2
+        );
+    }
+
+    drawSky();
+    drawTerrain();
+    drawNapalmFires();
+    drawSmokeTrails();
+    drawProjectiles();
+    drawExplosions();
+    drawParticles();
+
+    for (let t of tanks) drawTank(t);
+
+    drawTrajectoryPreview();
+    drawAimGuide();
+
+    ctx.restore();
+
+    // HUD always on top, no shake
+    if (gameState === 'playing') drawHUD();
+    if (gameState === 'roundEnd') drawRoundEnd();
+    if (gameState === 'matchEnd') drawMatchEnd();
+}
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// ---- START ----
+gameLoop();
+</script>
+</body>
+</html>
