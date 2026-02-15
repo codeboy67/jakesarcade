@@ -190,7 +190,7 @@ function playSound(type, params = {}) {
 
 // ---- GAME STATE ----
 let W, H;
-let gameState = 'menu'; // menu, playing, roundEnd, matchEnd, aiTurn
+let gameState = 'menu'; // menu, playing, roundEnd, matchEnd, nameEntry, aiTurn
 let gameMode = '1p'; // 1p, 2p
 let aiDifficulty = 'medium';
 let currentPlayer = 0; // 0 or 1
@@ -228,6 +228,51 @@ let aiThinkTimer = 0;
 let aiAction = null;
 let projectileActive = false;
 let waitingForEffects = false;
+
+// ---- LEADERBOARD STATE ----
+let nameEntryText = '';
+let nameEntryCursorBlink = 0;
+let nameEntryWinnerIndex = -1;
+const LEADERBOARD_KEY = 'tankWarsLeaderboard';
+
+function getLeaderboard() {
+    try {
+        const data = JSON.parse(localStorage.getItem(LEADERBOARD_KEY));
+        if (Array.isArray(data)) return data.slice(0, 10);
+    } catch (e) {}
+    return [];
+}
+
+function saveLeaderboard(board) {
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(board.slice(0, 10)));
+}
+
+function isTopTenWorthy(dummyParam) {
+    // Check if a new match win could make the top 10
+    // A returning player always qualifies (they'll increment their existing entry)
+    // A new player with 1 win qualifies if board isn't full, or if bottom entry has <= 1 win
+    const board = getLeaderboard();
+    if (board.length < 10) return true;
+    // If the lowest score on the board is 1, a new player with 1 win ties
+    // (and pushes off the oldest). Always allow entry — worst case they'll be 11th and get trimmed.
+    // This is generous but provides a better UX.
+    return true;
+}
+
+function addToLeaderboard(name, matchWins) {
+    const normalizedName = (name.toUpperCase() || 'PLAYER').trim();
+    const board = getLeaderboard();
+    // Check if this player name already exists — if so, increment their score
+    const existing = board.find(e => e.name === normalizedName);
+    if (existing) {
+        existing.score += 1;
+        existing.date = Date.now();
+    } else {
+        board.push({ name: normalizedName, score: 1, date: Date.now() });
+    }
+    board.sort((a, b) => b.score - a.score || a.date - b.date);
+    saveLeaderboard(board.slice(0, 10));
+}
 
 const THEMES = [
     { name: 'Green Hills', sky1: '#1a1a3e', sky2: '#2d5a27', ground: '#3a7d2a', groundDark: '#2d6120', groundAccent: '#4a9d3a', particle: '#5ab340' },
@@ -770,8 +815,40 @@ function processAI() {
 
 // ---- INPUT ----
 document.addEventListener('keydown', (e) => {
-    keys[e.key] = true;
     ensureAudio();
+
+    // ---- NAME ENTRY STATE: capture typed name, block all other controls ----
+    if (gameState === 'nameEntry') {
+        e.preventDefault();
+        if (e.key === 'Enter') {
+            // Confirm name entry and save to leaderboard
+            const finalName = nameEntryText.trim() || 'PLAYER';
+            const winnerScore = roundScores[nameEntryWinnerIndex];
+            addToLeaderboard(finalName, winnerScore);
+            gameState = 'matchEnd';
+            return;
+        }
+        if (e.key === 'Backspace') {
+            nameEntryText = nameEntryText.slice(0, -1);
+            return;
+        }
+        if (e.key === 'Escape') {
+            // Skip name entry, save as default
+            addToLeaderboard('PLAYER', roundScores[nameEntryWinnerIndex]);
+            gameState = 'matchEnd';
+            return;
+        }
+        // Allow letters, numbers, spaces, dashes, underscores
+        if (e.key.length === 1 && nameEntryText.length < 12) {
+            const allowed = /^[A-Za-z0-9 _\-]$/;
+            if (allowed.test(e.key)) {
+                nameEntryText += e.key.toUpperCase();
+            }
+        }
+        return;
+    }
+
+    keys[e.key] = true;
 
     // ESC key — return to main menu from any non-menu state
     if (e.key === 'Escape' && gameState !== 'menu') {
@@ -818,8 +895,17 @@ document.addEventListener('keydown', (e) => {
                     initRound();
                     gameState = 'playing';
                 } else {
-                    gameState = 'matchEnd';
-                    matchEndTimer = 0;
+                    // Match is over — check if winner qualifies for leaderboard
+                    nameEntryWinnerIndex = roundScores[0] >= ROUNDS_TO_WIN ? 0 : 1;
+                    const winnerScore = roundScores[nameEntryWinnerIndex];
+                    if (isTopTenWorthy(winnerScore)) {
+                        nameEntryText = '';
+                        gameState = 'nameEntry';
+                        matchEndTimer = 0;
+                    } else {
+                        gameState = 'matchEnd';
+                        matchEndTimer = 0;
+                    }
                 }
             } else {
                 gameState = 'menu';
@@ -853,7 +939,9 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('keyup', (e) => {
-    keys[e.key] = false;
+    if (gameState !== 'nameEntry') {
+        keys[e.key] = false;
+    }
 });
 
 // ---- PAUSE OVERLAY CLICK HANDLING ----
@@ -1474,6 +1562,14 @@ function drawMenu() {
     ctx.fillText('>>> START GAME <<<', W / 2, startY);
     ctx.globalAlpha = 1;
 
+    // ---- LEADERBOARD PANEL ON MENU ----
+    const menuBoard = getLeaderboard();
+    if (menuBoard.length > 0 && W > 900) {
+        const lbX = W - 380;
+        const lbY = H * 0.25;
+        drawLeaderboard(lbX, lbY, 5, 'TOP 5 SCORES');
+    }
+
     // ---- CONTROLS PANEL ----
     // Panel dimensions and position
     const controlsPanelW = 420;
@@ -1623,13 +1719,157 @@ function drawRoundEnd() {
         ctx.fillText(`${winner.name} WINS THE MATCH!`, W / 2, H * 0.55);
         ctx.fillStyle = '#aaa';
         ctx.font = '18px "Segoe UI", Arial';
-        ctx.fillText('Press Space or Enter to return to menu', W / 2, H * 0.65);
-        gameState = 'matchEnd';
+        ctx.fillText('Press Space or Enter to continue', W / 2, H * 0.65);
     } else {
         ctx.fillStyle = '#aaa';
         ctx.font = '18px "Segoe UI", Arial';
         ctx.fillText('Press Space or Enter for next round', W / 2, H * 0.55);
     }
+}
+
+function drawNameEntry() {
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    const winner = roundScores[0] >= ROUNDS_TO_WIN ? tanks[0] : tanks[1];
+
+    // Victory header
+    ctx.fillStyle = winner.color;
+    ctx.font = 'bold 42px "Segoe UI", Arial';
+    ctx.fillText(`${winner.name} WINS!`, W / 2, H * 0.2);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '24px "Segoe UI", Arial';
+    ctx.fillText(`Final Score: ${roundScores[0]} - ${roundScores[1]}`, W / 2, H * 0.28);
+
+    // NEW HIGH SCORE notification
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 28px "Segoe UI", Arial';
+    const pulse = Math.sin(Date.now() * 0.005) * 0.15 + 0.85;
+    ctx.globalAlpha = pulse;
+    ctx.fillText('NEW HIGH SCORE!', W / 2, H * 0.38);
+    ctx.globalAlpha = 1;
+
+    // Name entry prompt
+    ctx.fillStyle = '#ccc';
+    ctx.font = '20px "Segoe UI", Arial';
+    ctx.fillText('ENTER YOUR NAME:', W / 2, H * 0.46);
+
+    // Name entry box
+    const boxW = 320;
+    const boxH = 50;
+    const boxX = W / 2 - boxW / 2;
+    const boxY = H * 0.49;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+    // Typed text
+    const displayText = nameEntryText || '';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 28px "Segoe UI", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(displayText, W / 2, boxY + 34);
+
+    // Blinking cursor
+    nameEntryCursorBlink = (nameEntryCursorBlink + 1) % 60;
+    if (nameEntryCursorBlink < 35) {
+        const textWidth = ctx.measureText(displayText).width;
+        const cursorX = W / 2 + textWidth / 2 + 3;
+        ctx.fillStyle = '#FFD700';
+        ctx.fillRect(cursorX, boxY + 10, 2, 30);
+    }
+
+    // Instructions
+    ctx.fillStyle = '#888';
+    ctx.font = '14px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Type your name (max 12 chars) | Enter to confirm | ESC to skip', W / 2, boxY + boxH + 25);
+}
+
+function drawLeaderboard(x, y, maxEntries, title) {
+    const board = getLeaderboard();
+    const entries = board.slice(0, maxEntries);
+    const panelW = 340;
+    const headerH = 36;
+    const rowH = 26;
+    const padTop = 10;
+    const padBottom = 14;
+    const panelH = headerH + padTop + Math.max(entries.length, 1) * rowH + padBottom;
+
+    // Panel background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    const cr = 8;
+    ctx.beginPath();
+    ctx.moveTo(x + cr, y);
+    ctx.lineTo(x + panelW - cr, y);
+    ctx.quadraticCurveTo(x + panelW, y, x + panelW, y + cr);
+    ctx.lineTo(x + panelW, y + panelH - cr);
+    ctx.quadraticCurveTo(x + panelW, y + panelH, x + panelW - cr, y + panelH);
+    ctx.lineTo(x + cr, y + panelH);
+    ctx.quadraticCurveTo(x, y + panelH, x, y + panelH - cr);
+    ctx.lineTo(x, y + cr);
+    ctx.quadraticCurveTo(x, y, x + cr, y);
+    ctx.closePath();
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Title
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 20px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(title || 'LEADERBOARD', x + panelW / 2, y + 26);
+
+    // Divider
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + 20, y + headerH);
+    ctx.lineTo(x + panelW - 20, y + headerH);
+    ctx.stroke();
+
+    if (entries.length === 0) {
+        ctx.fillStyle = '#666';
+        ctx.font = '14px "Segoe UI", Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('No scores yet', x + panelW / 2, y + headerH + padTop + 16);
+        return panelH;
+    }
+
+    const rankColors = ['#FFD700', '#C0C0C0', '#CD7F32'];
+
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const rowY = y + headerH + padTop + i * rowH + 18;
+
+        // Rank color
+        ctx.fillStyle = i < 3 ? rankColors[i] : '#ccc';
+        ctx.font = 'bold 15px "Segoe UI", Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${i + 1}.`, x + 18, rowY);
+
+        // Name
+        ctx.fillStyle = i < 3 ? rankColors[i] : '#fff';
+        ctx.font = '15px "Segoe UI", Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(entry.name, x + 50, rowY);
+
+        // Score (wins)
+        ctx.fillStyle = i < 3 ? rankColors[i] : '#aaa';
+        ctx.font = 'bold 15px "Segoe UI", Arial';
+        ctx.textAlign = 'right';
+        ctx.fillText(`${entry.score} win${entry.score !== 1 ? 's' : ''}`, x + panelW - 20, rowY);
+    }
+
+    return panelH;
 }
 
 function drawMatchEnd() {
@@ -1643,7 +1883,7 @@ function drawMatchEnd() {
     const time = Date.now() * 0.001;
     for (let i = 0; i < 30; i++) {
         const px = W / 2 + Math.sin(time * 2 + i * 0.8) * (100 + i * 8);
-        const py = H * 0.3 + Math.cos(time * 1.5 + i * 0.6) * 40;
+        const py = H * 0.15 + Math.cos(time * 1.5 + i * 0.6) * 30;
         const colors = ['#ff0', '#f80', '#0ff', '#f0f', '#0f0'];
         ctx.fillStyle = colors[i % colors.length];
         ctx.globalAlpha = 0.5 + Math.sin(time * 3 + i) * 0.3;
@@ -1654,16 +1894,20 @@ function drawMatchEnd() {
     ctx.globalAlpha = 1;
 
     ctx.fillStyle = winner.color;
-    ctx.font = 'bold 48px "Segoe UI", Arial';
-    ctx.fillText(`${winner.name} WINS!`, W / 2, H * 0.38);
+    ctx.font = 'bold 42px "Segoe UI", Arial';
+    ctx.fillText(`${winner.name} WINS!`, W / 2, H * 0.2);
 
     ctx.fillStyle = '#fff';
-    ctx.font = '28px "Segoe UI", Arial';
-    ctx.fillText(`Final Score: ${roundScores[0]} - ${roundScores[1]}`, W / 2, H * 0.48);
+    ctx.font = '24px "Segoe UI", Arial';
+    ctx.fillText(`Final Score: ${roundScores[0]} - ${roundScores[1]}`, W / 2, H * 0.28);
+
+    // Leaderboard
+    drawLeaderboard(W / 2 - 170, H * 0.32, 10, 'TOP 10 LEADERBOARD');
 
     ctx.fillStyle = '#aaa';
     ctx.font = '18px "Segoe UI", Arial';
-    ctx.fillText('Press Space or Enter to return to menu', W / 2, H * 0.58);
+    ctx.textAlign = 'center';
+    ctx.fillText('Press Space or Enter to return to menu', W / 2, H - 30);
 }
 
 // ---- TRAJECTORY PREVIEW (faint dots) ----
@@ -1840,6 +2084,7 @@ function draw() {
     if (gameState === 'playing') drawHUD();
     if (gameState === 'roundEnd') drawRoundEnd();
     if (gameState === 'matchEnd') drawMatchEnd();
+    if (gameState === 'nameEntry') drawNameEntry();
 
     // Pause overlay drawn last, on top of everything
     if (paused) drawPauseOverlay();
