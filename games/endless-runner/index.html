@@ -83,9 +83,42 @@ function sfxMilestone() {
 }
 
 // ---- GAME STATE ----
-const STATE = { MENU: 0, PLAYING: 1, GAMEOVER: 2, PAUSED: 3 };
+const STATE = { MENU: 0, PLAYING: 1, GAMEOVER: 2, PAUSED: 3, NAME_ENTRY: 4 };
 let state = STATE.MENU;
 let stateBeforePause = STATE.PLAYING;
+
+// ---- LEADERBOARD ----
+const LEADERBOARD_KEY = 'endlessRunnerLeaderboard';
+let nameEntryText = '';
+let nameEntryCursor = 0; // blink timer
+
+function loadLeaderboard() {
+    try {
+        const data = JSON.parse(localStorage.getItem(LEADERBOARD_KEY));
+        if (Array.isArray(data)) return data.slice(0, 10);
+    } catch(e) {}
+    return [];
+}
+
+function saveLeaderboard(board) {
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(board.slice(0, 10)));
+}
+
+function isTopTenScore(s) {
+    const board = loadLeaderboard();
+    if (board.length < 10) return true;
+    return s > board[board.length - 1].score;
+}
+
+function addToLeaderboard(name, s) {
+    const board = loadLeaderboard();
+    board.push({ name: name || 'PLAYER', score: s, date: Date.now() });
+    board.sort((a, b) => b.score - a.score);
+    const trimmed = board.slice(0, 10);
+    saveLeaderboard(trimmed);
+    return trimmed;
+}
+
 let distance = 0; // in pixels
 let distanceMetres = 0;
 let coins = 0;
@@ -173,6 +206,27 @@ let touchStartY = 0;
 let touchStartX = 0;
 
 window.addEventListener('keydown', e => {
+    // ---- NAME ENTRY mode: capture text input, block all game controls ----
+    if (state === STATE.NAME_ENTRY) {
+        e.preventDefault();
+        if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+            // Confirm name
+            const finalName = nameEntryText.trim() || 'PLAYER';
+            addToLeaderboard(finalName, score);
+            state = STATE.GAMEOVER;
+            return;
+        }
+        if (e.code === 'Backspace') {
+            nameEntryText = nameEntryText.slice(0, -1);
+            return;
+        }
+        // Only allow letters, numbers, spaces, hyphens, underscores
+        if (e.key.length === 1 && /[a-zA-Z0-9 _\-]/.test(e.key) && nameEntryText.length < 12) {
+            nameEntryText += e.key.toUpperCase();
+        }
+        return; // Block everything else during name entry
+    }
+
     if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'KeyS') {
         e.preventDefault();
     }
@@ -198,7 +252,10 @@ window.addEventListener('keydown', e => {
         if (e.code === 'ArrowDown' || e.code === 'KeyS') slidePressed = true;
     }
 });
-window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('keyup', e => {
+    if (state === STATE.NAME_ENTRY) return; // Block during name entry
+    keys[e.code] = false;
+});
 
 // Touch controls
 canvas.addEventListener('touchstart', e => {
@@ -208,6 +265,7 @@ canvas.addEventListener('touchstart', e => {
     touchStartY = t.clientY;
     touchStartX = t.clientX;
     if (state === STATE.MENU) { startGame(); return; }
+    if (state === STATE.NAME_ENTRY) return; // Ignore touch during name entry
     if (state === STATE.GAMEOVER) { goToMenu(); return; }
     // Tap upper half = jump, lower half = slide
     if (t.clientY < canvas.height * 0.5) {
@@ -238,11 +296,14 @@ function handleClick(mx, my) {
         if (mx > bx - 100 && mx < bx + 100 && my > by - 30 && my < by + 30) {
             startGame();
         }
+    } else if (state === STATE.NAME_ENTRY) {
+        // Do nothing, wait for keyboard input
+        return;
     } else if (state === STATE.GAMEOVER) {
-        // Play again
+        // Play again button — positioned after leaderboard
         const bx = canvas.width / 2;
-        const by = canvas.height / 2 + 100;
-        if (mx > bx - 100 && mx < bx + 100 && my > by - 30 && my < by + 30) {
+        const by = gameOverPlayAgainY || (canvas.height / 2 + 100);
+        if (mx > bx - 100 && mx < bx + 100 && my > by - 25 && my < by + 25) {
             goToMenu();
         }
     } else if (state === STATE.PAUSED) {
@@ -676,11 +737,18 @@ function killPlayer() {
     player.alive = false;
     sfxHit();
     spawnParticles(player.x + player.w / 2, player.y + player.h / 2, '#ff4444', 20);
-    state = STATE.GAMEOVER;
     score = distanceMetres + coins * 10;
     if (score > highScore) {
         highScore = score;
         localStorage.setItem('endlessRunnerHigh', highScore);
+    }
+    // Check if score qualifies for leaderboard
+    if (isTopTenScore(score)) {
+        state = STATE.NAME_ENTRY;
+        nameEntryText = '';
+        nameEntryCursor = 0;
+    } else {
+        state = STATE.GAMEOVER;
     }
     backBtn.style.display = 'block';
 }
@@ -746,7 +814,7 @@ function draw() {
     // Parallax background layers
     drawBgLayers();
 
-    if (state === STATE.PLAYING || state === STATE.GAMEOVER || state === STATE.PAUSED) {
+    if (state === STATE.PLAYING || state === STATE.GAMEOVER || state === STATE.PAUSED || state === STATE.NAME_ENTRY) {
         drawGround(theme);
         drawGaps();
         drawObstacles();
@@ -758,12 +826,13 @@ function draw() {
     }
 
     if (state === STATE.MENU) drawMenu();
+    if (state === STATE.NAME_ENTRY) drawNameEntry();
     if (state === STATE.GAMEOVER) drawGameOver();
     if (state === STATE.PAUSED) drawPaused();
 }
 
 function drawBgLayers() {
-    const gY = state === STATE.PLAYING || state === STATE.GAMEOVER || state === STATE.PAUSED ? groundY : canvas.height - 80;
+    const gY = state === STATE.PLAYING || state === STATE.GAMEOVER || state === STATE.PAUSED || state === STATE.NAME_ENTRY ? groundY : canvas.height - 80;
     const theme = themes[currentTheme];
     const layerAlpha = [0.15, 0.25, 0.4];
     const layerColors = {
@@ -1434,69 +1503,286 @@ function drawMenu() {
     ctx.font = '14px Arial';
     ctx.fillText('Mobile: Tap top half to jump, bottom half to slide', W / 2, panelY + panelH + 22);
 
+    // ---- TOP 5 LEADERBOARD ON MENU ----
+    const menuBoard = loadLeaderboard();
+    if (menuBoard.length > 0) {
+        const lbCount = Math.min(menuBoard.length, 5);
+        const lbEntryH = 26;
+        const lbPanelW = 300;
+        const lbPanelH = 50 + lbCount * lbEntryH + 14;
+        const lbPanelX = W / 2 - lbPanelW / 2;
+        const lbPanelY = panelY + panelH + 42;
+
+        // Panel background
+        ctx.fillStyle = 'rgba(10, 10, 30, 0.75)';
+        ctx.beginPath();
+        roundRect(ctx, lbPanelX, lbPanelY, lbPanelW, lbPanelH, 14);
+        ctx.fill();
+
+        // Border
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        roundRect(ctx, lbPanelX, lbPanelY, lbPanelW, lbPanelH, 14);
+        ctx.stroke();
+
+        // Header
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('TOP SCORES', W / 2, lbPanelY + 24);
+
+        // Separator
+        ctx.strokeStyle = 'rgba(255,215,0,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(lbPanelX + 20, lbPanelY + 34);
+        ctx.lineTo(lbPanelX + lbPanelW - 20, lbPanelY + 34);
+        ctx.stroke();
+
+        // Entries
+        for (let i = 0; i < lbCount; i++) {
+            const entry = menuBoard[i];
+            const ey = lbPanelY + 54 + i * lbEntryH;
+
+            // Rank color
+            if (i === 0) ctx.fillStyle = '#FFD700';
+            else if (i === 1) ctx.fillStyle = '#C0C0C0';
+            else if (i === 2) ctx.fillStyle = '#CD7F32';
+            else ctx.fillStyle = '#ffffff';
+
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText(`${i + 1}.`, lbPanelX + 24, ey);
+            ctx.font = '14px Arial';
+            ctx.fillText(entry.name, lbPanelX + 50, ey);
+            ctx.textAlign = 'right';
+            ctx.font = 'bold 14px Arial';
+            ctx.fillText(`${entry.score}`, lbPanelX + lbPanelW - 24, ey);
+        }
+    }
+
     // Jake's Arcade branding
+    ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.font = '12px Arial';
     ctx.fillText("Jake's Arcade", W / 2, H - 20);
 }
 
+function drawNameEntry() {
+    const W = canvas.width;
+    const H = canvas.height;
+
+    // Overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Panel
+    const panelW = 400;
+    const panelH = 280;
+    const panelX = W / 2 - panelW / 2;
+    const panelY = H / 2 - panelH / 2;
+
+    ctx.fillStyle = 'rgba(30,30,50,0.95)';
+    ctx.beginPath();
+    roundRect(ctx, panelX, panelY, panelW, panelH, 16);
+    ctx.fill();
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    roundRect(ctx, panelX, panelY, panelW, panelH, 16);
+    ctx.stroke();
+
+    // Title
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 32px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('TOP 10 SCORE!', W / 2, panelY + 45);
+
+    // Score display
+    ctx.fillStyle = '#44ff88';
+    ctx.font = 'bold 24px Arial';
+    ctx.fillText(`Score: ${Math.floor(score)}`, W / 2, panelY + 85);
+
+    // "ENTER YOUR NAME:" prompt
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px Arial';
+    ctx.fillText('ENTER YOUR NAME:', W / 2, panelY + 130);
+
+    // Text input field
+    const fieldW = 280;
+    const fieldH = 44;
+    const fieldX = W / 2 - fieldW / 2;
+    const fieldY = panelY + 145;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath();
+    roundRect(ctx, fieldX, fieldY, fieldW, fieldH, 8);
+    ctx.fill();
+    ctx.strokeStyle = '#44aaff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    roundRect(ctx, fieldX, fieldY, fieldW, fieldH, 8);
+    ctx.stroke();
+
+    // Typed text
+    nameEntryCursor += 0.05;
+    const displayText = nameEntryText || '';
+    ctx.fillStyle = nameEntryText ? '#fff' : 'rgba(255,255,255,0.3)';
+    ctx.font = 'bold 22px Arial';
+    ctx.textAlign = 'center';
+    const showText = displayText || 'PLAYER';
+    ctx.fillText(showText, W / 2, fieldY + 29);
+
+    // Blinking cursor
+    if (Math.sin(nameEntryCursor * 6) > 0) {
+        const textWidth = ctx.measureText(displayText).width;
+        const cursorX = W / 2 + textWidth / 2 + 3;
+        ctx.fillStyle = '#44aaff';
+        ctx.fillRect(cursorX, fieldY + 10, 2, 24);
+    }
+
+    // Hint
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('Type your name and press ENTER to confirm', W / 2, fieldY + fieldH + 30);
+    ctx.fillText('(Max 12 characters, letters/numbers/spaces)', W / 2, fieldY + fieldH + 50);
+}
+
 function drawGameOver() {
     const W = canvas.width;
     const H = canvas.height;
+    const board = loadLeaderboard();
 
     // Overlay
     ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.fillRect(0, 0, W, H);
 
-    // Panel
+    // Calculate panel height dynamically based on leaderboard entries
+    const leaderboardEntries = Math.min(board.length, 10);
+    const statsH = 120; // game over title + stats
+    const lbHeaderH = 40;
+    const lbEntryH = 24;
+    const lbH = leaderboardEntries > 0 ? (lbHeaderH + leaderboardEntries * lbEntryH + 20) : 0;
+    const buttonH = 70;
+    const totalPanelH = statsH + lbH + buttonH + 30;
+
+    const panelW = 400;
+    const panelX = W / 2 - panelW / 2;
+    const panelY = Math.max(20, H / 2 - totalPanelH / 2);
+
+    // Panel background
     ctx.fillStyle = 'rgba(30,30,50,0.95)';
     ctx.beginPath();
-    roundRect(ctx, W / 2 - 180, H / 2 - 150, 360, 300, 16);
+    roundRect(ctx, panelX, panelY, panelW, totalPanelH, 16);
     ctx.fill();
     ctx.strokeStyle = 'rgba(255,255,255,0.1)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    roundRect(ctx, W / 2 - 180, H / 2 - 150, 360, 300, 16);
+    roundRect(ctx, panelX, panelY, panelW, totalPanelH, 16);
     ctx.stroke();
+
+    let cy = panelY + 40;
 
     // Title
     ctx.fillStyle = '#ff4444';
-    ctx.font = 'bold 36px Arial';
+    ctx.font = 'bold 32px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('GAME OVER', W / 2, H / 2 - 100);
+    ctx.fillText('GAME OVER', W / 2, cy);
+    cy += 35;
 
-    // Stats
+    // Stats row
     ctx.fillStyle = '#fff';
-    ctx.font = '20px Arial';
-    ctx.fillText(`Distance: ${distanceMetres}m`, W / 2, H / 2 - 50);
-
-    ctx.fillStyle = '#ffdd00';
-    ctx.fillText(`Coins: ${coins}`, W / 2, H / 2 - 20);
-
-    ctx.fillStyle = '#44ff88';
-    ctx.font = 'bold 22px Arial';
-    ctx.fillText(`Score: ${Math.floor(score)}`, W / 2, H / 2 + 15);
+    ctx.font = '17px Arial';
+    ctx.fillText(`Distance: ${distanceMetres}m    Coins: ${coins}    Score: ${Math.floor(score)}`, W / 2, cy);
+    cy += 25;
 
     // High score
     if (score >= highScore) {
         ctx.fillStyle = '#ffdd00';
-        ctx.font = 'bold 18px Arial';
-        ctx.fillText('NEW HIGH SCORE!', W / 2, H / 2 + 48);
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText('NEW HIGH SCORE!', W / 2, cy);
     } else {
         ctx.fillStyle = '#aaa';
-        ctx.font = '16px Arial';
-        ctx.fillText(`High Score: ${highScore}`, W / 2, H / 2 + 48);
+        ctx.font = '14px Arial';
+        ctx.fillText(`High Score: ${highScore}`, W / 2, cy);
+    }
+    cy += 30;
+
+    // ---- LEADERBOARD ----
+    if (board.length > 0) {
+        // Separator
+        ctx.strokeStyle = 'rgba(255,215,0,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(panelX + 30, cy);
+        ctx.lineTo(panelX + panelW - 30, cy);
+        ctx.stroke();
+        cy += 10;
+
+        // Leaderboard header
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 18px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('LEADERBOARD', W / 2, cy + 16);
+        cy += 30;
+
+        // Column headers
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText('RANK', panelX + 30, cy);
+        ctx.fillText('NAME', panelX + 80, cy);
+        ctx.textAlign = 'right';
+        ctx.fillText('SCORE', panelX + panelW - 30, cy);
+        cy += 18;
+
+        // Entries
+        for (let i = 0; i < leaderboardEntries; i++) {
+            const entry = board[i];
+            const isCurrentScore = (entry.score === Math.floor(score) && entry.date && Date.now() - entry.date < 5000);
+
+            // Rank color
+            if (i === 0) ctx.fillStyle = '#FFD700';       // Gold
+            else if (i === 1) ctx.fillStyle = '#C0C0C0';  // Silver
+            else if (i === 2) ctx.fillStyle = '#CD7F32';   // Bronze
+            else ctx.fillStyle = '#ffffff';
+
+            // Highlight current score row
+            if (isCurrentScore) {
+                ctx.fillStyle = 'rgba(68,255,136,0.15)';
+                ctx.fillRect(panelX + 20, cy - 14, panelW - 40, lbEntryH);
+                if (i === 0) ctx.fillStyle = '#FFD700';
+                else if (i === 1) ctx.fillStyle = '#C0C0C0';
+                else if (i === 2) ctx.fillStyle = '#CD7F32';
+                else ctx.fillStyle = '#44ff88';
+            }
+
+            ctx.font = 'bold 15px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText(`${i + 1}.`, panelX + 35, cy);
+            ctx.font = '15px Arial';
+            ctx.fillText(entry.name, panelX + 80, cy);
+            ctx.textAlign = 'right';
+            ctx.font = 'bold 15px Arial';
+            ctx.fillText(`${entry.score}`, panelX + panelW - 30, cy);
+            cy += lbEntryH;
+        }
+        cy += 10;
     }
 
     // Play again button
     const bx = W / 2;
-    const by = H / 2 + 100;
+    const by = cy + 25;
+    gameOverPlayAgainY = by; // Store for click detection
     ctx.fillStyle = '#44cc44';
     ctx.beginPath();
     roundRect(ctx, bx - 100, by - 25, 200, 50, 10);
     ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
     ctx.fillText('PLAY AGAIN', bx, by + 7);
 }
 
@@ -1568,6 +1854,7 @@ function goToMenu() {
 
 // ---- GAME LOOP ----
 let menuBgScroll = 0;
+let gameOverPlayAgainY = 0; // Track button position for click handling
 
 function gameLoop(time) {
     if (lastTime === 0) lastTime = time;
