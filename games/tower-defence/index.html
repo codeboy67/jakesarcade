@@ -163,6 +163,7 @@ let paused = false;
 let stateBeforePause = null;
 let pauseResumeBtn = { x: 0, y: 0, w: 260, h: 50 };
 let pauseMenuBtn = { x: 0, y: 0, w: 260, h: 50 };
+let menuStartBtn = { x: 0, y: 0, w: 200, h: 55 };
 
 // --- Tower Definitions ---
 const TOWER_DEFS = {
@@ -1182,38 +1183,74 @@ function drawMenu() {
   }
 
   const cx = canvas.width / 2;
-  const cy = canvas.height / 2;
+
+  // -- Adaptive layout: compute all section sizes first --
+  // We lay out top-to-bottom: title, subtitle, tower preview, start button, controls panel
+  const titleFontSize = Math.min(62, canvas.width * 0.06);
+  const subtitleFontSize = Math.min(22, canvas.width * 0.022);
+
+  // Spacing values
+  const topPad = 30;
+  const titleY = topPad + titleFontSize / 2 + 10;
+  const subtitleY = titleY + titleFontSize / 2 + 20;
+
+  // Tower preview row
+  const previewTypes = ['arrow', 'cannon', 'ice', 'sniper', 'lightning'];
+  const pw = 60;
+  const previewY = subtitleY + 40;
+
+  // Start button
+  const btnW = 200, btnH = 55;
+  const startBtnY = previewY + 45;
+
+  // Controls panel (below start button)
+  const controlLines = [
+    { key: 'Click grass',     desc: 'Place a tower' },
+    { key: 'Click tower',     desc: 'Select / Upgrade / Sell' },
+    { key: '1 - 5',           desc: 'Select tower type' },
+    { key: 'Space / Enter',   desc: 'Send next wave' },
+    { key: 'Right-click',     desc: 'Deselect' },
+    { key: 'P',               desc: 'Pause game' },
+    { key: 'ESC',             desc: 'Main menu' },
+  ];
+  const controlLineH = 28;
+  const controlHeadingH = 36;
+  const controlPadV = 16;
+  const controlPanelH = controlHeadingH + controlLines.length * controlLineH + controlPadV * 2;
+  const controlPanelW = Math.min(420, canvas.width - 40);
+  const controlPanelY = startBtnY + btnH + 22;
+
+  // ---------- Draw everything ----------
 
   // Title shadow
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.font = 'bold 62px sans-serif';
+  ctx.font = `bold ${titleFontSize}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('Tower Defence TD', cx + 3, cy - 103);
+  ctx.fillText('Tower Defence TD', cx + 3, titleY + 3);
 
   // Title
   ctx.fillStyle = '#4caf50';
-  ctx.font = 'bold 62px sans-serif';
-  ctx.fillText('Tower Defence TD', cx, cy - 106);
+  ctx.font = `bold ${titleFontSize}px sans-serif`;
+  ctx.fillText('Tower Defence TD', cx, titleY);
 
   // Subtitle
   ctx.fillStyle = '#8d6e63';
-  ctx.font = '22px sans-serif';
-  ctx.fillText('Defend your base across 30 waves!', cx, cy - 50);
+  ctx.font = `${subtitleFontSize}px sans-serif`;
+  ctx.fillText('Defend your base across 30 waves!', cx, subtitleY);
 
   // Tower icons preview
-  const previewTypes = ['arrow', 'cannon', 'ice', 'sniper', 'lightning'];
-  const pw = 60;
   const pStartX = cx - (previewTypes.length * pw) / 2;
   for (let i = 0; i < previewTypes.length; i++) {
     const def = TOWER_DEFS[previewTypes[i]];
     const px = pStartX + i * pw + pw / 2;
-    const py = cy - 8;
+    const py = previewY;
 
     ctx.fillStyle = def.color;
     ctx.fillRect(px - 16, py - 16, 32, 32);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 16px sans-serif';
+    ctx.textBaseline = 'middle';
     ctx.fillText(def.icon, px, py);
     ctx.fillStyle = '#b0bec5';
     ctx.font = '10px sans-serif';
@@ -1221,10 +1258,8 @@ function drawMenu() {
   }
 
   // Start button
-  const btnW = 200, btnH = 55;
-  const bx = cx - btnW / 2, by = cy + 55;
-
-  // Hover detect
+  const bx = cx - btnW / 2, by = startBtnY;
+  menuStartBtn.x = bx; menuStartBtn.y = by; menuStartBtn.w = btnW; menuStartBtn.h = btnH;
   const hovered = mouseX >= bx && mouseX <= bx + btnW && mouseY >= by && mouseY <= by + btnH;
 
   ctx.fillStyle = hovered ? '#388e3c' : '#2e7d32';
@@ -1238,12 +1273,76 @@ function drawMenu() {
   ctx.textBaseline = 'middle';
   ctx.fillText('START GAME', cx, by + btnH / 2);
 
-  // Instructions
+  // ===== CONTROLS PANEL =====
+  const cpx = cx - controlPanelW / 2;
+  const cpy = controlPanelY;
+
+  // Semi-transparent dark background panel
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  const panelRadius = 10;
+  ctx.beginPath();
+  ctx.moveTo(cpx + panelRadius, cpy);
+  ctx.lineTo(cpx + controlPanelW - panelRadius, cpy);
+  ctx.quadraticCurveTo(cpx + controlPanelW, cpy, cpx + controlPanelW, cpy + panelRadius);
+  ctx.lineTo(cpx + controlPanelW, cpy + controlPanelH - panelRadius);
+  ctx.quadraticCurveTo(cpx + controlPanelW, cpy + controlPanelH, cpx + controlPanelW - panelRadius, cpy + controlPanelH);
+  ctx.lineTo(cpx + panelRadius, cpy + controlPanelH);
+  ctx.quadraticCurveTo(cpx, cpy + controlPanelH, cpx, cpy + controlPanelH - panelRadius);
+  ctx.lineTo(cpx, cpy + panelRadius);
+  ctx.quadraticCurveTo(cpx, cpy, cpx + panelRadius, cpy);
+  ctx.closePath();
+  ctx.fill();
+
+  // Panel border
+  ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // "CONTROLS" heading
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('CONTROLS', cx, cpy + controlPadV + controlHeadingH / 2 - 2);
+
+  // Thin gold separator line under heading
+  ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+  ctx.lineWidth = 1;
+  const sepY = cpy + controlPadV + controlHeadingH;
+  ctx.beginPath();
+  ctx.moveTo(cpx + 30, sepY);
+  ctx.lineTo(cpx + controlPanelW - 30, sepY);
+  ctx.stroke();
+
+  // Control lines — key in gold on left, description in white on right
+  const keyColX = cpx + 32;                          // left-aligned key text
+  const descColX = cpx + controlPanelW / 2 + 20;     // left-aligned description
+  let lineY = sepY + controlLineH / 2 + 6;
+
+  for (let i = 0; i < controlLines.length; i++) {
+    const cl = controlLines[i];
+
+    // Key label — gold / bold
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 17px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(cl.key, cpx + controlPanelW / 2 - 8, lineY);
+
+    // Description — white
+    ctx.fillStyle = '#ECEFF1';
+    ctx.font = '17px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(cl.desc, cpx + controlPanelW / 2 + 8, lineY);
+
+    lineY += controlLineH;
+  }
+
+  // Tip line under the panel
   ctx.fillStyle = '#78909c';
   ctx.font = '14px sans-serif';
-  ctx.fillText('Click tower buttons below, then click on grass to place.', cx, by + btnH + 35);
-  ctx.fillText('Click a placed tower to upgrade or sell it.', cx, by + btnH + 55);
-  ctx.fillText('Enemies follow the path - stop them from reaching the exit!', cx, by + btnH + 75);
+  ctx.textAlign = 'center';
+  ctx.fillText('Enemies follow the path \u2014 stop them reaching the exit!', cx, cpy + controlPanelH + 20);
 }
 
 function drawGameOver() {
@@ -1462,9 +1561,8 @@ canvas.addEventListener('click', (e) => {
 
   if (state === STATE.MENU) {
     backLink.style.display = 'none';
-    const btnW = 200, btnH = 55;
-    const bx = cx - btnW / 2, by = cy + 55;
-    if (mouseX >= bx && mouseX <= bx + btnW && mouseY >= by && mouseY <= by + btnH) {
+    if (mouseX >= menuStartBtn.x && mouseX <= menuStartBtn.x + menuStartBtn.w &&
+        mouseY >= menuStartBtn.y && mouseY <= menuStartBtn.y + menuStartBtn.h) {
       state = STATE.PLAYING;
       resetGame();
       playSound('wave');
