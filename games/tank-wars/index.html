@@ -1474,11 +1474,87 @@ function drawMenu() {
     ctx.fillText('>>> START GAME <<<', W / 2, startY);
     ctx.globalAlpha = 1;
 
-    // Controls help
-    ctx.fillStyle = '#555';
+    // ---- CONTROLS PANEL ----
+    // Panel dimensions and position
+    const controlsPanelW = 420;
+    const controlsLineH = 26;
+    const controlsLines = [
+        { key: 'Left / Right', desc: 'Adjust aim angle' },
+        { key: 'Up / Down', desc: 'Adjust power' },
+        { key: 'Space', desc: 'Fire!' },
+        { key: 'A / D', desc: 'Move tank' },
+        { key: '1 - 5', desc: 'Select ammo type' },
+        { key: 'P', desc: 'Pause game' },
+        { key: 'ESC', desc: 'Main menu' }
+    ];
+    const controlsHeadingH = 36;
+    const controlsPadTop = 14;
+    const controlsPadBottom = 16;
+    const controlsPanelH = controlsHeadingH + controlsPadTop + controlsLines.length * controlsLineH + controlsPadBottom;
+    const controlsPanelX = W / 2 - controlsPanelW / 2;
+    const controlsPanelY = H - controlsPanelH - 20;
+
+    // Semi-transparent dark background panel
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.beginPath();
+    const cr = 10; // corner radius
+    ctx.moveTo(controlsPanelX + cr, controlsPanelY);
+    ctx.lineTo(controlsPanelX + controlsPanelW - cr, controlsPanelY);
+    ctx.quadraticCurveTo(controlsPanelX + controlsPanelW, controlsPanelY, controlsPanelX + controlsPanelW, controlsPanelY + cr);
+    ctx.lineTo(controlsPanelX + controlsPanelW, controlsPanelY + controlsPanelH - cr);
+    ctx.quadraticCurveTo(controlsPanelX + controlsPanelW, controlsPanelY + controlsPanelH, controlsPanelX + controlsPanelW - cr, controlsPanelY + controlsPanelH);
+    ctx.lineTo(controlsPanelX + cr, controlsPanelY + controlsPanelH);
+    ctx.quadraticCurveTo(controlsPanelX, controlsPanelY + controlsPanelH, controlsPanelX, controlsPanelY + controlsPanelH - cr);
+    ctx.lineTo(controlsPanelX, controlsPanelY + cr);
+    ctx.quadraticCurveTo(controlsPanelX, controlsPanelY, controlsPanelX + cr, controlsPanelY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Panel border
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // "CONTROLS" heading
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 22px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('CONTROLS', W / 2, controlsPanelY + 28);
+
+    // Divider line under heading
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(controlsPanelX + 30, controlsPanelY + controlsHeadingH);
+    ctx.lineTo(controlsPanelX + controlsPanelW - 30, controlsPanelY + controlsHeadingH);
+    ctx.stroke();
+
+    // Control lines
+    const controlsStartY = controlsPanelY + controlsHeadingH + controlsPadTop;
+    const keyColX = W / 2 - 20;   // right-aligned keys
+    const descColX = W / 2 + 10;  // left-aligned descriptions
+
+    for (let i = 0; i < controlsLines.length; i++) {
+        const lineY = controlsStartY + i * controlsLineH + 16;
+
+        // Key label in gold
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 17px "Segoe UI", Arial';
+        ctx.textAlign = 'right';
+        ctx.fillText(controlsLines[i].key, keyColX, lineY);
+
+        // Description in white
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '16px "Segoe UI", Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText(controlsLines[i].desc, descColX, lineY);
+    }
+
+    // Menu navigation hint at very bottom
+    ctx.fillStyle = '#999';
     ctx.font = '13px "Segoe UI", Arial';
-    ctx.fillText('Arrow Keys: Navigate   |   Enter/Space: Select', W / 2, H * 0.88);
-    ctx.fillText('In-game: Arrows = Aim/Power  |  A/D = Move  |  Space = Fire  |  1-5 = Ammo', W / 2, H * 0.92);
+    ctx.textAlign = 'center';
+    ctx.fillText('Use Arrow Keys to navigate menu  |  Enter or Space to select', W / 2, H - 8);
 }
 
 function drawMenuTank(x, y, color, angle) {
