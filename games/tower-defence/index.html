@@ -165,6 +165,53 @@ let pauseResumeBtn = { x: 0, y: 0, w: 260, h: 50 };
 let pauseMenuBtn = { x: 0, y: 0, w: 260, h: 50 };
 let menuStartBtn = { x: 0, y: 0, w: 200, h: 55 };
 
+// --- Leaderboard State ---
+const LEADERBOARD_KEY = 'towerDefenceLeaderboard';
+let enteringName = false;       // true when the name-input overlay is active
+let nameInputText = '';         // current typed name
+let nameInputCursorBlink = 0;  // timer for blinking cursor
+let pendingScore = 0;          // score that will be saved
+let pendingIsWin = false;      // whether the run was a victory
+
+// --- Leaderboard Helpers ---
+function loadLeaderboard() {
+  try {
+    const raw = localStorage.getItem(LEADERBOARD_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.slice(0, 10);
+  } catch (e) { return []; }
+}
+
+function saveLeaderboard(board) {
+  localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(board.slice(0, 10)));
+}
+
+function isTopTenScore(score) {
+  const board = loadLeaderboard();
+  if (board.length < 10) return true;
+  return score >= board[board.length - 1].score;
+}
+
+function addLeaderboardEntry(name, score) {
+  const board = loadLeaderboard();
+  board.push({ name: name || 'PLAYER', score });
+  board.sort((a, b) => b.score - a.score);
+  saveLeaderboard(board.slice(0, 10));
+}
+
+function getRankColor(rank) {
+  if (rank === 1) return '#FFD700'; // Gold
+  if (rank === 2) return '#C0C0C0'; // Silver
+  if (rank === 3) return '#CD7F32'; // Bronze
+  return '#ffffff';
+}
+
+// Dynamic button rects for game over / win (updated during draw)
+let gameOverBtn = { x: 0, y: 0, w: 180, h: 50 };
+let winBtn = { x: 0, y: 0, w: 180, h: 50 };
+
 // --- Tower Definitions ---
 const TOWER_DEFS = {
   arrow:     { name:'Arrow',     cost:50,  color:'#8d6e63', range:120, fireRate:0.4,  damage:8,   splash:0,  slow:0, chain:0, icon:'A' },
@@ -501,6 +548,14 @@ function update(dt) {
     showMessage(`Wave ${wave} complete! +$${waveCompleteBonus}`);
     if (wave >= totalWaves) {
       state = STATE.WIN;
+      pendingScore = wave;
+      pendingIsWin = true;
+      if (isTopTenScore(pendingScore)) {
+        enteringName = true;
+        nameInputText = '';
+      } else {
+        enteringName = false;
+      }
       playSound('win');
       return;
     }
@@ -558,6 +613,14 @@ function update(dt) {
       if (lives <= 0) {
         lives = 0;
         state = STATE.GAMEOVER;
+        pendingScore = wave;
+        pendingIsWin = false;
+        if (isTopTenScore(pendingScore)) {
+          enteringName = true;
+          nameInputText = '';
+        } else {
+          enteringName = false;
+        }
         playSound('lose');
       }
     }
@@ -1343,6 +1406,236 @@ function drawMenu() {
   ctx.font = '14px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText('Enemies follow the path \u2014 stop them reaching the exit!', cx, cpy + controlPanelH + 20);
+
+  // --- Menu Leaderboard (Top 5) ---
+  const menuBoard = loadLeaderboard();
+  const menuCount = Math.min(menuBoard.length, 5);
+  if (menuCount > 0) {
+    const lbLineH = 24;
+    const lbHeaderH = 32;
+    const lbPadV = 10;
+    const lbPanelW = 280;
+    const lbPanelH = lbHeaderH + menuCount * lbLineH + lbPadV * 2;
+    const lbPanelY = cpy + controlPanelH + 40;
+    const lbPanelX = cx - lbPanelW / 2;
+
+    // Panel background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+    ctx.lineWidth = 1.5;
+    const lbr = 8;
+    ctx.beginPath();
+    ctx.moveTo(lbPanelX + lbr, lbPanelY);
+    ctx.lineTo(lbPanelX + lbPanelW - lbr, lbPanelY);
+    ctx.quadraticCurveTo(lbPanelX + lbPanelW, lbPanelY, lbPanelX + lbPanelW, lbPanelY + lbr);
+    ctx.lineTo(lbPanelX + lbPanelW, lbPanelY + lbPanelH - lbr);
+    ctx.quadraticCurveTo(lbPanelX + lbPanelW, lbPanelY + lbPanelH, lbPanelX + lbPanelW - lbr, lbPanelY + lbPanelH);
+    ctx.lineTo(lbPanelX + lbr, lbPanelY + lbPanelH);
+    ctx.quadraticCurveTo(lbPanelX, lbPanelY + lbPanelH, lbPanelX, lbPanelY + lbPanelH - lbr);
+    ctx.lineTo(lbPanelX, lbPanelY + lbr);
+    ctx.quadraticCurveTo(lbPanelX, lbPanelY, lbPanelX + lbr, lbPanelY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Header
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('TOP SCORES', cx, lbPanelY + lbPadV + lbHeaderH / 2 - 2);
+
+    // Separator
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.3)';
+    ctx.lineWidth = 1;
+    const lbSepY = lbPanelY + lbPadV + lbHeaderH;
+    ctx.beginPath();
+    ctx.moveTo(lbPanelX + 16, lbSepY);
+    ctx.lineTo(lbPanelX + lbPanelW - 16, lbSepY);
+    ctx.stroke();
+
+    // Entries
+    let lbEntryY = lbSepY + lbLineH / 2 + 4;
+    for (let i = 0; i < menuCount; i++) {
+      const entry = menuBoard[i];
+      const rank = i + 1;
+      const color = getRankColor(rank);
+
+      ctx.fillStyle = color;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${rank}.`, lbPanelX + 36, lbEntryY);
+
+      ctx.textAlign = 'left';
+      ctx.font = '14px sans-serif';
+      ctx.fillText(entry.name, lbPanelX + 44, lbEntryY);
+
+      ctx.textAlign = 'right';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(`Wave ${entry.score}`, lbPanelX + lbPanelW - 16, lbEntryY);
+
+      lbEntryY += lbLineH;
+    }
+  }
+}
+
+// --- Name Input Drawing ---
+function drawNameInput(cx, startY) {
+  nameInputCursorBlink += 0.05;
+
+  // Panel background
+  const panelW = 360, panelH = 130;
+  const px = cx - panelW / 2, py = startY;
+  ctx.fillStyle = 'rgba(20, 20, 30, 0.92)';
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  const r = 8;
+  ctx.moveTo(px + r, py);
+  ctx.lineTo(px + panelW - r, py);
+  ctx.quadraticCurveTo(px + panelW, py, px + panelW, py + r);
+  ctx.lineTo(px + panelW, py + panelH - r);
+  ctx.quadraticCurveTo(px + panelW, py + panelH, px + panelW - r, py + panelH);
+  ctx.lineTo(px + r, py + panelH);
+  ctx.quadraticCurveTo(px, py + panelH, px, py + panelH - r);
+  ctx.lineTo(px, py + r);
+  ctx.quadraticCurveTo(px, py, px + r, py);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // "NEW HIGH SCORE!" header
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('NEW HIGH SCORE!', cx, py + 26);
+
+  // "ENTER YOUR NAME:" label
+  ctx.fillStyle = '#ECEFF1';
+  ctx.font = '16px sans-serif';
+  ctx.fillText('ENTER YOUR NAME:', cx, py + 54);
+
+  // Text input field
+  const fieldW = 260, fieldH = 34;
+  const fx = cx - fieldW / 2, fy = py + 68;
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(fx, fy, fieldW, fieldH);
+  ctx.strokeStyle = '#4fc3f7';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(fx, fy, fieldW, fieldH);
+
+  // Typed text
+  const displayText = nameInputText || '';
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 18px monospace';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const textX = fx + 10;
+  ctx.fillText(displayText, textX, fy + fieldH / 2);
+
+  // Blinking cursor
+  if (Math.floor(nameInputCursorBlink) % 2 === 0) {
+    const textW = ctx.measureText(displayText).width;
+    ctx.fillStyle = '#4fc3f7';
+    ctx.fillRect(textX + textW + 2, fy + 6, 2, fieldH - 12);
+  }
+
+  // "Press ENTER to confirm" hint
+  ctx.fillStyle = '#78909c';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Press ENTER to confirm (max 12 chars)', cx, py + panelH - 10);
+}
+
+// --- Leaderboard Panel Drawing ---
+// Draws a top-N leaderboard centred at cx, starting at startY.
+// Returns the Y position after the panel (for placing buttons below).
+function drawLeaderboardPanel(cx, startY, maxEntries) {
+  const board = loadLeaderboard();
+  const count = Math.min(board.length, maxEntries);
+
+  if (count === 0) {
+    ctx.fillStyle = '#78909c';
+    ctx.font = '16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('No scores yet!', cx, startY + 20);
+    return startY + 50;
+  }
+
+  const lineH = 28;
+  const headerH = 36;
+  const padV = 12;
+  const panelW = 340;
+  const panelH = headerH + count * lineH + padV * 2;
+  const px = cx - panelW / 2;
+  const py = startY;
+
+  // Panel background
+  ctx.fillStyle = 'rgba(10, 10, 20, 0.85)';
+  ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+  ctx.lineWidth = 1.5;
+  const r = 8;
+  ctx.beginPath();
+  ctx.moveTo(px + r, py);
+  ctx.lineTo(px + panelW - r, py);
+  ctx.quadraticCurveTo(px + panelW, py, px + panelW, py + r);
+  ctx.lineTo(px + panelW, py + panelH - r);
+  ctx.quadraticCurveTo(px + panelW, py + panelH, px + panelW - r, py + panelH);
+  ctx.lineTo(px + r, py + panelH);
+  ctx.quadraticCurveTo(px, py + panelH, px, py + panelH - r);
+  ctx.lineTo(px, py + r);
+  ctx.quadraticCurveTo(px, py, px + r, py);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Header
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('LEADERBOARD', cx, py + padV + headerH / 2 - 2);
+
+  // Separator
+  ctx.strokeStyle = 'rgba(255, 215, 0, 0.3)';
+  ctx.lineWidth = 1;
+  const sepY = py + padV + headerH;
+  ctx.beginPath();
+  ctx.moveTo(px + 20, sepY);
+  ctx.lineTo(px + panelW - 20, sepY);
+  ctx.stroke();
+
+  // Entries
+  let entryY = sepY + lineH / 2 + 4;
+  for (let i = 0; i < count; i++) {
+    const entry = board[i];
+    const rank = i + 1;
+    const color = getRankColor(rank);
+
+    // Rank
+    ctx.fillStyle = color;
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${rank}.`, px + 44, entryY);
+
+    // Name
+    ctx.textAlign = 'left';
+    ctx.font = '16px sans-serif';
+    ctx.fillText(entry.name, px + 52, entryY);
+
+    // Score (wave)
+    ctx.textAlign = 'right';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText(`Wave ${entry.score}`, px + panelW - 20, entryY);
+
+    entryY += lineH;
+  }
+
+  return py + panelH;
 }
 
 function drawGameOver() {
@@ -1350,21 +1643,33 @@ function drawGameOver() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const cx = canvas.width / 2;
-  const cy = canvas.height / 2;
+  // Shift everything up to make room for leaderboard
+  const topY = Math.max(30, canvas.height * 0.08);
 
   ctx.fillStyle = '#f44336';
-  ctx.font = 'bold 56px sans-serif';
+  ctx.font = 'bold 48px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('GAME OVER', cx, cy - 40);
+  ctx.fillText('GAME OVER', cx, topY + 24);
 
   ctx.fillStyle = '#b0bec5';
-  ctx.font = '24px sans-serif';
-  ctx.fillText(`You reached wave ${wave} of ${totalWaves}`, cx, cy + 10);
+  ctx.font = '22px sans-serif';
+  ctx.fillText(`You reached wave ${wave} of ${totalWaves}`, cx, topY + 64);
+
+  let cursorY = topY + 90;
+
+  // --- Name entry overlay ---
+  if (enteringName) {
+    drawNameInput(cx, cursorY);
+    return; // don't draw the rest until name is confirmed
+  }
+
+  // --- Leaderboard ---
+  cursorY = drawLeaderboardPanel(cx, cursorY, 10);
 
   // Retry button
   const btnW = 180, btnH = 50;
-  const bx = cx - btnW / 2, by = cy + 50;
+  const bx = cx - btnW / 2, by = cursorY + 12;
   const hovered = mouseX >= bx && mouseX <= bx + btnW && mouseY >= by && mouseY <= by + btnH;
   ctx.fillStyle = hovered ? '#c62828' : '#b71c1c';
   ctx.fillRect(bx, by, btnW, btnH);
@@ -1373,7 +1678,12 @@ function drawGameOver() {
   ctx.strokeRect(bx, by, btnW, btnH);
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
   ctx.fillText('PLAY AGAIN', cx, by + btnH / 2);
+
+  // Store button position for click handler
+  gameOverBtn.x = bx; gameOverBtn.y = by; gameOverBtn.w = btnW; gameOverBtn.h = btnH;
 }
 
 function drawWin() {
@@ -1381,21 +1691,32 @@ function drawWin() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const cx = canvas.width / 2;
-  const cy = canvas.height / 2;
+  const topY = Math.max(30, canvas.height * 0.08);
 
   ctx.fillStyle = '#ffd54f';
-  ctx.font = 'bold 56px sans-serif';
+  ctx.font = 'bold 48px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('VICTORY!', cx, cy - 40);
+  ctx.fillText('VICTORY!', cx, topY + 24);
 
   ctx.fillStyle = '#b0bec5';
-  ctx.font = '24px sans-serif';
-  ctx.fillText(`All ${totalWaves} waves defeated! Gold: $${gold}`, cx, cy + 10);
+  ctx.font = '22px sans-serif';
+  ctx.fillText(`All ${totalWaves} waves defeated! Gold: $${gold}`, cx, topY + 64);
+
+  let cursorY = topY + 90;
+
+  // --- Name entry overlay ---
+  if (enteringName) {
+    drawNameInput(cx, cursorY);
+    return;
+  }
+
+  // --- Leaderboard ---
+  cursorY = drawLeaderboardPanel(cx, cursorY, 10);
 
   // Play again
   const btnW = 180, btnH = 50;
-  const bx = cx - btnW / 2, by = cy + 50;
+  const bx = cx - btnW / 2, by = cursorY + 12;
   const hovered = mouseX >= bx && mouseX <= bx + btnW && mouseY >= by && mouseY <= by + btnH;
   ctx.fillStyle = hovered ? '#388e3c' : '#2e7d32';
   ctx.fillRect(bx, by, btnW, btnH);
@@ -1404,7 +1725,12 @@ function drawWin() {
   ctx.strokeRect(bx, by, btnW, btnH);
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
   ctx.fillText('PLAY AGAIN', cx, by + btnH / 2);
+
+  // Store button position for click handler
+  winBtn.x = bx; winBtn.y = by; winBtn.w = btnW; winBtn.h = btnH;
 }
 
 // --- Pause Overlay ---
@@ -1527,6 +1853,10 @@ function resetGame() {
   spawnTimer = 0;
   message = '';
   messageTimer = 0;
+  enteringName = false;
+  nameInputText = '';
+  pendingScore = 0;
+  pendingIsWin = false;
   buildMap();
 }
 
@@ -1571,9 +1901,11 @@ canvas.addEventListener('click', (e) => {
   }
 
   if (state === STATE.GAMEOVER || state === STATE.WIN) {
-    const btnW = 180, btnH = 50;
-    const bx = cx - btnW / 2, by = cy + 50;
-    if (mouseX >= bx && mouseX <= bx + btnW && mouseY >= by && mouseY <= by + btnH) {
+    // If entering name, ignore clicks (keyboard only)
+    if (enteringName) return;
+
+    const btn = (state === STATE.GAMEOVER) ? gameOverBtn : winBtn;
+    if (mouseX >= btn.x && mouseX <= btn.x + btn.w && mouseY >= btn.y && mouseY <= btn.y + btn.h) {
       state = STATE.MENU;
       backLink.style.display = 'block';
       playSound('click');
@@ -1672,6 +2004,38 @@ canvas.addEventListener('contextmenu', (e) => {
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
+  // --- Name entry mode: capture all input ---
+  if (enteringName && (state === STATE.GAMEOVER || state === STATE.WIN)) {
+    e.preventDefault();
+    e.stopPropagation();
+    const key = e.key;
+
+    if (key === 'Enter') {
+      // Confirm name
+      const finalName = nameInputText.trim() || 'PLAYER';
+      addLeaderboardEntry(finalName, pendingScore);
+      enteringName = false;
+      playSound('click');
+      return;
+    }
+    if (key === 'Backspace') {
+      nameInputText = nameInputText.slice(0, -1);
+      return;
+    }
+    if (key === 'Escape') {
+      // Submit with default name
+      addLeaderboardEntry('PLAYER', pendingScore);
+      enteringName = false;
+      playSound('click');
+      return;
+    }
+    // Only allow printable characters, max 12 chars
+    if (key.length === 1 && nameInputText.length < 12) {
+      nameInputText += key.toUpperCase();
+    }
+    return;
+  }
+
   const key = e.key.toLowerCase();
 
   // ESC: navigate to main menu from any non-menu state
