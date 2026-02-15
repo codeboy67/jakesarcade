@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <title>Pong Championship - Jake's Arcade</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -101,11 +103,6 @@ function playGameWin() {
         (function(idx){ setTimeout(function(){ playTone(notes[idx], 0.25, 'square', 0.12); }, idx * 150); })(i);
     }
 }
-function playCurve() {
-    playTone(300, 0.15, 'sine', 0.1);
-    setTimeout(function(){ playTone(500, 0.2, 'sine', 0.12); }, 80);
-}
-
 // --- Canvas Resize ---
 function resize() {
     canvas.width = window.innerWidth;

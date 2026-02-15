@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
 <title>Escape Room - Jake's Arcade</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -50,8 +52,8 @@ let message='',messageTimer=0;
 let roomData={};
 let clickAnim=[];
 let completionTime=0;
-let bestTimes=JSON.parse(localStorage.getItem('escapeRoomBest')||'{}');
-let roomCompleted=JSON.parse(localStorage.getItem('escapeRoomDone')||'{}');
+let bestTimes=(function(){try{return JSON.parse(localStorage.getItem('escapeRoomBest')||'{}');}catch(e){return {};}})();
+let roomCompleted=(function(){try{return JSON.parse(localStorage.getItem('escapeRoomDone')||'{}');}catch(e){return {};}})();
 let hoveredObj=null;
 let menuHover=-1;
 let menuBtnHover='';
@@ -59,7 +61,7 @@ let paused=false;
 let stateBeforePause='';
 
 // Leaderboard
-let leaderboard=JSON.parse(localStorage.getItem('escapeRoomLeaderboard')||'[]');
+let leaderboard=(function(){try{return JSON.parse(localStorage.getItem('escapeRoomLeaderboard')||'[]');}catch(e){return [];}})();
 let nameEntryText='';
 let nameEntryCursor=0;
 let nameEntryBlinkTimer=0;
