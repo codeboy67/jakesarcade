@@ -127,6 +127,9 @@ var PADDLE_SPEED_RATIO = 0.009;
 var STATE = { MENU: 0, PLAYING: 1, COUNTDOWN: 2, SET_OVER: 3, MATCH_OVER: 4, PAUSED: 5 };
 
 var gameState = STATE.MENU;
+var stateBeforePause = null;
+var pauseResumeBtn = null;
+var pauseMenuBtn = null;
 var menuSelection = 0;
 var menuOptions = ['VS AI - Easy', 'VS AI - Medium', 'VS AI - Hard', 'Local 2 Player'];
 var isVsAI = true;
@@ -254,10 +257,16 @@ window.addEventListener('keydown', function(e) {
     }
 
     if (e.code === 'Escape') {
+        if (gameState === STATE.PLAYING || gameState === STATE.COUNTDOWN || gameState === STATE.PAUSED) {
+            window.location.href = '../../index.html';
+        }
+    }
+    if (e.code === 'KeyP') {
         if (gameState === STATE.PLAYING || gameState === STATE.COUNTDOWN) {
+            stateBeforePause = gameState;
             gameState = STATE.PAUSED;
         } else if (gameState === STATE.PAUSED) {
-            gameState = STATE.PLAYING;
+            gameState = stateBeforePause || STATE.PLAYING;
         }
     }
 
@@ -1279,7 +1288,7 @@ function drawMenu() {
     ctx.fillText('Best of 3 sets  |  First to 11 (win by 2)', cw / 2, instY + instSize * 1.6);
     ctx.fillText('P1: W/S to move, SPACE for ability', cw / 2, instY + instSize * 3.2);
     ctx.fillText('P2: \u2191/\u2193 to move, ENTER for ability', cw / 2, instY + instSize * 4.8);
-    ctx.fillText('ESC to pause', cw / 2, instY + instSize * 6.4);
+    ctx.fillText('P to pause | ESC for main menu', cw / 2, instY + instSize * 6.4);
 
     // Decorative animated ball
     var ballX = cw / 2 + Math.sin(now * 2) * cw * 0.12;
@@ -1400,7 +1409,30 @@ function drawPaused() {
     ctx.restore();
 
     drawNeonText('PAUSED', canvas.width / 2, canvas.height * 0.43, 52, '#ffaa00');
-    drawNeonText('Press ESC to resume', canvas.width / 2, canvas.height * 0.55, 20, '#666699');
+
+    var cx = canvas.width / 2;
+    var btnW = 260, btnH = 50;
+    var resumeY = canvas.height * 0.52;
+    ctx.fillStyle = '#4a4';
+    ctx.fillRect(cx - btnW/2, resumeY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('RESUME', cx, resumeY + 33);
+
+    var menuBtnY = resumeY + 70;
+    ctx.fillStyle = '#c44';
+    ctx.fillRect(cx - btnW/2, menuBtnY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('MAIN MENU', cx, menuBtnY + 33);
+
+    ctx.font = '16px monospace';
+    ctx.fillStyle = '#888';
+    ctx.fillText('Press P to resume | ESC for main menu', cx, menuBtnY + 90);
+    ctx.textAlign = 'left';
+
+    pauseResumeBtn = { x: cx - btnW/2, y: resumeY, w: btnW, h: btnH };
+    pauseMenuBtn = { x: cx - btnW/2, y: menuBtnY, w: btnW, h: btnH };
 }
 
 // --- Main Loop ---
@@ -1440,6 +1472,19 @@ function gameLoop(timestamp) {
 
     requestAnimationFrame(gameLoop);
 }
+
+canvas.addEventListener('click', function(e) {
+    if (gameState === STATE.PAUSED) {
+        var rect = canvas.getBoundingClientRect();
+        var mx = e.clientX - rect.left;
+        var my = e.clientY - rect.top;
+        if (pauseResumeBtn && mx >= pauseResumeBtn.x && mx <= pauseResumeBtn.x + pauseResumeBtn.w && my >= pauseResumeBtn.y && my <= pauseResumeBtn.y + pauseResumeBtn.h) {
+            gameState = stateBeforePause || STATE.PLAYING;
+        } else if (pauseMenuBtn && mx >= pauseMenuBtn.x && mx <= pauseMenuBtn.x + pauseMenuBtn.w && my >= pauseMenuBtn.y && my <= pauseMenuBtn.y + pauseMenuBtn.h) {
+            window.location.href = '../../index.html';
+        }
+    }
+});
 
 lastTime = performance.now();
 requestAnimationFrame(gameLoop);
