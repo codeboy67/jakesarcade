@@ -230,8 +230,52 @@ const keys = {};
 window.addEventListener('keydown', e => {
     keys[e.code] = true;
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+
+    // ESC — return to main menu (any gameplay state, not the menu itself)
+    if (e.code === 'Escape' && gameState !== 'menu' && gameState !== 'difficultySelect') {
+        if (paused) {
+            // Already paused, go to main menu
+            window.location.href = '../../index.html';
+        } else {
+            window.location.href = '../../index.html';
+        }
+    }
+
+    // P — toggle pause during gameplay states
+    if (e.code === 'KeyP' && !paused && gameState !== 'menu' && gameState !== 'difficultySelect') {
+        paused = true;
+        stateBeforePause = gameState;
+    } else if (e.code === 'KeyP' && paused) {
+        paused = false;
+        gameState = stateBeforePause;
+    }
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// Click handler for pause menu buttons
+canvas.addEventListener('click', function(e) {
+    if (!paused) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const w = canvas.width;
+    const h = canvas.height;
+    const btnW = 260;
+    const btnH = 50;
+    const btnX = w / 2 - btnW / 2;
+    const resumeBtnY = h / 2 + 10;
+    const menuBtnY = h / 2 + 75;
+
+    // RESUME button
+    if (mx >= btnX && mx <= btnX + btnW && my >= resumeBtnY && my <= resumeBtnY + btnH) {
+        paused = false;
+        gameState = stateBeforePause;
+    }
+    // MAIN MENU button
+    if (mx >= btnX && mx <= btnX + btnW && my >= menuBtnY && my <= menuBtnY + btnH) {
+        window.location.href = '../../index.html';
+    }
+});
 
 // ---- Particles ----
 let particles = [];
@@ -1227,6 +1271,9 @@ let matchWinnerText = '';
 let player1 = new Fighter(200, 0, true, '#4488ff', 'P1');
 let player2 = new Fighter(600, 0, false, '#ff4444', 'P2');
 
+let paused = false;
+let stateBeforePause = '';
+
 let frameCount = 0;
 let lastKOSlowMo = false;
 
@@ -2065,10 +2112,59 @@ function draw() {
     drawControls();
 }
 
+// ---- Pause Overlay ----
+function drawPauseOverlay() {
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.fillRect(0, 0, w, h);
+
+    // PAUSED text
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(64, w * 0.055)}px Arial`;
+    ctx.fillText('PAUSED', w / 2, h / 2 - 40);
+
+    // Buttons
+    const btnW = 260;
+    const btnH = 50;
+    const btnX = w / 2 - btnW / 2;
+    const resumeBtnY = h / 2 + 10;
+    const menuBtnY = h / 2 + 75;
+
+    // RESUME button (green)
+    ctx.fillStyle = '#4a4';
+    ctx.fillRect(btnX, resumeBtnY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('RESUME', w / 2, resumeBtnY + btnH / 2 + 8);
+
+    // MAIN MENU button (red)
+    ctx.fillStyle = '#c44';
+    ctx.fillRect(btnX, menuBtnY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('MAIN MENU', w / 2, menuBtnY + btnH / 2 + 8);
+
+    // Help text
+    ctx.fillStyle = '#aaa';
+    ctx.font = `${Math.min(16, w * 0.013)}px Arial`;
+    ctx.fillText('Press P to resume | ESC for main menu', w / 2, menuBtnY + btnH + 35);
+
+    ctx.textAlign = 'left';
+}
+
 // ---- Game Loop ----
 function gameLoop() {
-    update();
+    if (!paused) {
+        update();
+    }
     draw();
+    if (paused) {
+        drawPauseOverlay();
+    }
     requestAnimationFrame(gameLoop);
 }
 
