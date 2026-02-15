@@ -175,6 +175,45 @@ class AudioEngine {
 
 const audio = new AudioEngine();
 
+// ============= LEADERBOARD =============
+const Leaderboard = {
+  KEY: 'zombieSiegeLeaderboard',
+
+  load() {
+    try {
+      const data = JSON.parse(localStorage.getItem(this.KEY));
+      if (Array.isArray(data)) return data.slice(0, 10);
+    } catch(e) {}
+    return [];
+  },
+
+  save(board) {
+    localStorage.setItem(this.KEY, JSON.stringify(board.slice(0, 10)));
+  },
+
+  qualifies(score) {
+    const board = this.load();
+    if (board.length < 10) return score > 0;
+    return score > board[board.length - 1].score;
+  },
+
+  add(name, score) {
+    const board = this.load();
+    board.push({ name: name.toUpperCase(), score: score, date: Date.now() });
+    board.sort((a, b) => b.score - a.score);
+    const trimmed = board.slice(0, 10);
+    this.save(trimmed);
+    return trimmed;
+  },
+
+  getRankColor(rank) {
+    if (rank === 1) return '#FFD700';
+    if (rank === 2) return '#C0C0C0';
+    if (rank === 3) return '#CD7F32';
+    return '#ffffff';
+  }
+};
+
 // ============= UTILITIES =============
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -205,12 +244,20 @@ const keys = {};
 const mouse = { x: 0, y: 0, down: false, rightDown: false };
 
 window.addEventListener('keydown', e => {
+  // Block all game input during name entry
+  if (game.state === 'nameEntry') {
+    e.preventDefault();
+    return;
+  }
   keys[e.key.toLowerCase()] = true;
   if (['1','2','3','4'].includes(e.key)) {
     game.switchWeapon(parseInt(e.key) - 1);
   }
 });
-window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+window.addEventListener('keyup', e => {
+  if (game.state === 'nameEntry') return;
+  keys[e.key.toLowerCase()] = false;
+});
 window.addEventListener('blur', () => {
   for (const k in keys) keys[k] = false;
   mouse.down = false;
@@ -228,6 +275,7 @@ canvas.addEventListener('mousemove', e => {
   mouse.y = e.clientY;
 });
 canvas.addEventListener('mousedown', e => {
+  if (game.state === 'nameEntry') return;
   if (e.button === 0) mouse.down = true;
   if (e.button === 2) mouse.rightDown = true;
 });
@@ -1042,7 +1090,7 @@ class Player {
 // ============= MAIN GAME =============
 class Game {
   constructor() {
-    this.state = 'menu'; // menu, playing, waveIntro, gameOverScreen, paused
+    this.state = 'menu'; // menu, playing, waveIntro, gameOverScreen, nameEntry, leaderboardScreen, paused
     this.stateBeforePause = null;
     this.player = null;
     this.zombies = [];
@@ -1067,6 +1115,13 @@ class Game {
     this.lastTime = 0;
     this.groundTiles = [];
     this.menuPulse = 0;
+
+    // Leaderboard / name entry state
+    this.nameEntryText = '';
+    this.nameEntryCursor = 0;
+    this.nameEntryBlink = 0;
+    this.leaderboardData = null;
+    this.newEntryRank = -1;
   }
 
   init() {
@@ -1243,12 +1298,38 @@ class Game {
   }
 
   gameOver() {
-    this.state = 'gameOverScreen';
+    // Clear all input state to prevent stuck keys during name entry
+    for (const k in keys) keys[k] = false;
+    mouse.down = false;
+    mouse.rightDown = false;
+
     audio.play('gameOver');
     if (this.score > this.highScore) {
       this.highScore = this.score;
       localStorage.setItem('zombieSiegeHighScore', this.score.toString());
     }
+
+    // Check if score qualifies for leaderboard
+    if (Leaderboard.qualifies(this.score)) {
+      this.state = 'nameEntry';
+      this.nameEntryText = '';
+      this.nameEntryCursor = 0;
+      this.nameEntryBlink = 0;
+    } else {
+      this.state = 'leaderboardScreen';
+      this.leaderboardData = Leaderboard.load();
+      this.newEntryRank = -1;
+    }
+  }
+
+  submitName() {
+    const name = this.nameEntryText.trim() || 'PLAYER';
+    this.leaderboardData = Leaderboard.add(name, this.score);
+    // Find the rank of the new entry
+    this.newEntryRank = this.leaderboardData.findIndex(
+      e => e.name === name.toUpperCase() && e.score === this.score
+    );
+    this.state = 'leaderboardScreen';
   }
 
   togglePause() {
@@ -1307,10 +1388,11 @@ class Game {
       return;
     }
 
-    if (this.state === 'gameOverScreen') {
+    if (this.state === 'gameOverScreen' || this.state === 'nameEntry' || this.state === 'leaderboardScreen') {
       // Update particles still
       this.particles = this.particles.filter(p => p.update(dt));
       this.floatingTexts = this.floatingTexts.filter(t => t.update(dt));
+      this.nameEntryBlink += dt * 3;
       return;
     }
 
@@ -1455,9 +1537,15 @@ class Game {
       this.drawWaveIntro();
     }
 
-    // Game over
+    // Game over / name entry / leaderboard
     if (this.state === 'gameOverScreen') {
       this.drawGameOver();
+    }
+    if (this.state === 'nameEntry') {
+      this.drawNameEntry();
+    }
+    if (this.state === 'leaderboardScreen') {
+      this.drawLeaderboardScreen();
     }
 
     // Boss HP bar
@@ -1591,6 +1679,74 @@ class Game {
       ctx.fillStyle = '#fa0';
       ctx.font = '20px "Courier New"';
       ctx.fillText('High Score: ' + this.highScore, cx, panelY + panelH + 115);
+    }
+
+    // Leaderboard panel on menu
+    const menuBoard = Leaderboard.load();
+    if (menuBoard.length > 0) {
+      const lbPanelW = 340;
+      const lbEntries = Math.min(menuBoard.length, 5);
+      const lbRowH = 28;
+      const lbPanelH = 50 + lbEntries * lbRowH + 10;
+      const lbPanelX = cx - lbPanelW / 2;
+      const lbPanelY = panelY + panelH + 140;
+
+      // Panel background
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+      ctx.beginPath();
+      const lr = 12;
+      ctx.moveTo(lbPanelX + lr, lbPanelY);
+      ctx.lineTo(lbPanelX + lbPanelW - lr, lbPanelY);
+      ctx.quadraticCurveTo(lbPanelX + lbPanelW, lbPanelY, lbPanelX + lbPanelW, lbPanelY + lr);
+      ctx.lineTo(lbPanelX + lbPanelW, lbPanelY + lbPanelH - lr);
+      ctx.quadraticCurveTo(lbPanelX + lbPanelW, lbPanelY + lbPanelH, lbPanelX + lbPanelW - lr, lbPanelY + lbPanelH);
+      ctx.lineTo(lbPanelX + lr, lbPanelY + lbPanelH);
+      ctx.quadraticCurveTo(lbPanelX, lbPanelY + lbPanelH, lbPanelX, lbPanelY + lbPanelH - lr);
+      ctx.lineTo(lbPanelX, lbPanelY + lr);
+      ctx.quadraticCurveTo(lbPanelX, lbPanelY, lbPanelX + lr, lbPanelY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Panel border
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Heading
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 20px "Courier New"';
+      ctx.textAlign = 'center';
+      ctx.fillText('LEADERBOARD', cx, lbPanelY + 28);
+
+      // Divider
+      ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(lbPanelX + 20, lbPanelY + 38);
+      ctx.lineTo(lbPanelX + lbPanelW - 20, lbPanelY + 38);
+      ctx.stroke();
+
+      // Entries
+      for (let i = 0; i < lbEntries; i++) {
+        const entry = menuBoard[i];
+        const y = lbPanelY + 60 + i * lbRowH;
+        const rank = i + 1;
+        const color = Leaderboard.getRankColor(rank);
+
+        // Rank
+        ctx.fillStyle = color;
+        ctx.font = 'bold 16px "Courier New"';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${rank}.`, lbPanelX + 20, y);
+
+        // Name
+        ctx.fillText(entry.name, lbPanelX + 55, y);
+
+        // Score
+        ctx.textAlign = 'right';
+        ctx.fillText(entry.score.toString(), lbPanelX + lbPanelW - 20, y);
+        ctx.textAlign = 'left';
+      }
     }
   }
 
@@ -1776,6 +1932,184 @@ class Game {
     ctx.fillText('[ CLICK TO PLAY AGAIN ]', cx, cy + 160);
   }
 
+  drawNameEntry() {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Title
+    ctx.fillStyle = '#f44';
+    ctx.shadowColor = '#f00';
+    ctx.shadowBlur = 30;
+    ctx.font = 'bold 52px "Courier New"';
+    ctx.textAlign = 'center';
+    ctx.fillText('GAME OVER', cx, cy - 160);
+    ctx.shadowBlur = 0;
+
+    // Stats row
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px "Courier New"';
+    ctx.fillText(`Score: ${this.score}  |  Wave: ${this.wave}  |  Kills: ${this.kills}`, cx, cy - 110);
+
+    if (this.score >= this.highScore && this.score > 0) {
+      ctx.fillStyle = '#fa0';
+      ctx.font = 'bold 20px "Courier New"';
+      ctx.fillText('NEW HIGH SCORE!', cx, cy - 80);
+    }
+
+    // Leaderboard qualification message
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 26px "Courier New"';
+    ctx.fillText('TOP 10 SCORE!', cx, cy - 40);
+
+    // Name entry prompt
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px "Courier New"';
+    ctx.fillText('ENTER YOUR NAME:', cx, cy + 10);
+
+    // Input field
+    const fieldW = 320;
+    const fieldH = 50;
+    const fieldX = cx - fieldW / 2;
+    const fieldY = cy + 25;
+
+    // Field background
+    ctx.fillStyle = 'rgba(30, 30, 50, 0.9)';
+    ctx.fillRect(fieldX, fieldY, fieldW, fieldH);
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(fieldX, fieldY, fieldW, fieldH);
+
+    // Text in field
+    const displayText = this.nameEntryText;
+    const cursorVisible = Math.sin(this.nameEntryBlink) > 0;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 28px "Courier New"';
+    ctx.textAlign = 'center';
+    ctx.fillText(displayText + (cursorVisible ? '_' : ''), cx, fieldY + 35);
+
+    // Character count
+    ctx.fillStyle = '#888';
+    ctx.font = '14px "Courier New"';
+    ctx.fillText(`${this.nameEntryText.length}/12 characters`, cx, fieldY + fieldH + 20);
+
+    // Instructions
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px "Courier New"';
+    ctx.fillText('Type your name and press ENTER to confirm', cx, fieldY + fieldH + 50);
+
+    ctx.fillStyle = '#666';
+    ctx.font = '14px "Courier New"';
+    ctx.fillText('(Default: PLAYER)', cx, fieldY + fieldH + 72);
+  }
+
+  drawLeaderboardScreen() {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Title
+    ctx.fillStyle = '#f44';
+    ctx.shadowColor = '#f00';
+    ctx.shadowBlur = 30;
+    ctx.font = 'bold 48px "Courier New"';
+    ctx.textAlign = 'center';
+    ctx.fillText('GAME OVER', cx, cy - 240);
+    ctx.shadowBlur = 0;
+
+    // Stats row
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px "Courier New"';
+    ctx.fillText(`Score: ${this.score}  |  Wave: ${this.wave}  |  Kills: ${this.kills}`, cx, cy - 200);
+
+    // Leaderboard title
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 28px "Courier New"';
+    ctx.fillText('--- LEADERBOARD ---', cx, cy - 160);
+
+    // Draw the leaderboard table
+    const board = this.leaderboardData || Leaderboard.load();
+    this.drawLeaderboardTable(board, cx, cy - 140, 10, this.newEntryRank);
+
+    // Play again prompt
+    const alpha = Math.sin(Date.now() / 500) * 0.3 + 0.7;
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.font = 'bold 22px "Courier New"';
+    ctx.textAlign = 'center';
+    ctx.fillText('[ CLICK TO PLAY AGAIN ]', cx, cy + 220);
+  }
+
+  drawLeaderboardTable(board, cx, startY, maxEntries, highlightRank) {
+    const rowH = 32;
+
+    if (board.length === 0) {
+      ctx.fillStyle = '#888';
+      ctx.font = '18px "Courier New"';
+      ctx.textAlign = 'center';
+      ctx.fillText('No scores yet!', cx, startY + 30);
+      return;
+    }
+
+    const count = Math.min(board.length, maxEntries);
+    const tableW = 420;
+    const tableX = cx - tableW / 2;
+
+    // Header
+    ctx.fillStyle = '#888';
+    ctx.font = 'bold 14px "Courier New"';
+    ctx.textAlign = 'left';
+    ctx.fillText('RANK', tableX + 10, startY + 15);
+    ctx.fillText('NAME', tableX + 80, startY + 15);
+    ctx.textAlign = 'right';
+    ctx.fillText('SCORE', tableX + tableW - 10, startY + 15);
+    ctx.textAlign = 'left';
+
+    // Divider
+    ctx.strokeStyle = 'rgba(255,215,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(tableX, startY + 22);
+    ctx.lineTo(tableX + tableW, startY + 22);
+    ctx.stroke();
+
+    for (let i = 0; i < count; i++) {
+      const entry = board[i];
+      const y = startY + 28 + (i + 1) * rowH;
+      const rank = i + 1;
+      const color = Leaderboard.getRankColor(rank);
+      const isHighlighted = i === highlightRank;
+
+      // Highlight background for new entry
+      if (isHighlighted) {
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.12)';
+        ctx.fillRect(tableX, y - rowH + 10, tableW, rowH);
+      }
+
+      // Rank
+      ctx.fillStyle = color;
+      ctx.font = 'bold 18px "Courier New"';
+      ctx.textAlign = 'left';
+      const rankStr = rank <= 3 ? ['1st', '2nd', '3rd'][rank - 1] : rank + 'th';
+      ctx.fillText(rankStr, tableX + 10, y);
+
+      // Name
+      ctx.fillStyle = isHighlighted ? '#FFD700' : color;
+      ctx.font = `${isHighlighted ? 'bold ' : ''}18px "Courier New"`;
+      ctx.fillText(entry.name, tableX + 80, y);
+
+      // Score
+      ctx.textAlign = 'right';
+      ctx.fillStyle = color;
+      ctx.font = 'bold 18px "Courier New"';
+      ctx.fillText(entry.score.toString(), tableX + tableW - 10, y);
+      ctx.textAlign = 'left';
+    }
+  }
+
   drawBossBar(boss) {
     const barW = 400;
     const barH = 20;
@@ -1833,6 +2167,8 @@ const game = new Game();
 canvas.addEventListener('click', (e) => {
   if (!audio.enabled) audio.init();
 
+  if (game.state === 'nameEntry') return;
+
   if (game.state === 'paused') {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
@@ -1851,10 +2187,30 @@ canvas.addEventListener('click', (e) => {
     game.init();
   } else if (game.state === 'gameOverScreen') {
     game.init();
+  } else if (game.state === 'leaderboardScreen') {
+    game.init();
   }
 });
 
 window.addEventListener('keydown', e => {
+  // Handle name entry input
+  if (game.state === 'nameEntry') {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      game.submitName();
+    } else if (e.key === 'Backspace') {
+      game.nameEntryText = game.nameEntryText.slice(0, -1);
+    } else if (e.key === 'Escape') {
+      // Submit with default name
+      game.nameEntryText = '';
+      game.submitName();
+    } else if (e.key.length === 1 && /[a-zA-Z0-9 _\-]/.test(e.key) && game.nameEntryText.length < 12) {
+      game.nameEntryText += e.key.toUpperCase();
+    }
+    return;
+  }
+
   if (e.key === 'Escape') {
     if (game.state === 'playing' || game.state === 'waveIntro' || game.state === 'paused') {
       window.location.href = '../../index.html';
