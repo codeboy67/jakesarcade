@@ -66,11 +66,47 @@ const POWER_UP_DURATION = {
 };
 
 // --- Game State ---
-let state = 'menu'; // menu, playing, gameover, paused, bossIntro
+let state = 'menu'; // menu, playing, gameover, paused, bossIntro, nameEntry
 let stateBeforePause = null;
 let score = 0;
 let highScore = parseInt(localStorage.getItem('spaceInvadersHighScore')) || 0;
 let lives = 3;
+
+// --- Leaderboard ---
+let nameEntryText = '';
+let nameEntryCursorBlink = 0;
+const MAX_NAME_LENGTH = 12;
+
+function getLeaderboard() {
+    try {
+        const data = JSON.parse(localStorage.getItem('spaceInvadersLeaderboard'));
+        if (Array.isArray(data)) return data.slice(0, 10);
+    } catch(e) {}
+    return [];
+}
+
+function saveLeaderboard(board) {
+    localStorage.setItem('spaceInvadersLeaderboard', JSON.stringify(board.slice(0, 10)));
+}
+
+function isTopTenScore(s) {
+    const board = getLeaderboard();
+    if (board.length < 10) return s > 0;
+    return s > board[board.length - 1].score;
+}
+
+function addToLeaderboard(name, s) {
+    const board = getLeaderboard();
+    board.push({ name: name || 'PLAYER', score: s, wave: wave, date: Date.now() });
+    board.sort((a, b) => b.score - a.score);
+    const trimmed = board.slice(0, 10);
+    saveLeaderboard(trimmed);
+    // Also update high score
+    if (s > highScore) {
+        highScore = s;
+        localStorage.setItem('spaceInvadersHighScore', highScore);
+    }
+}
 let wave = 1;
 let combo = 0;
 let comboMultiplier = 1;
@@ -110,6 +146,7 @@ let ufoTimer = 0;
 // Keys
 const keys = {};
 window.addEventListener('keydown', e => {
+    if (state === 'nameEntry') return; // Don't set game keys during name entry
     keys[e.key] = true;
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
 });
@@ -1141,10 +1178,16 @@ function playerDie() {
     laserBeam = null;
 
     if (lives <= 0) {
-        state = 'gameover';
-        if (score > highScore) {
-            highScore = score;
-            localStorage.setItem('spaceInvadersHighScore', highScore);
+        if (isTopTenScore(score)) {
+            state = 'nameEntry';
+            nameEntryText = '';
+            nameEntryCursorBlink = 0;
+        } else {
+            state = 'gameover';
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('spaceInvadersHighScore', highScore);
+            }
         }
         backLink.classList.remove('hidden');
     } else {
@@ -1206,6 +1249,7 @@ function update(dt) {
 
     if (state !== 'playing') {
         updateStars(dt);
+        if (state === 'nameEntry') updateParticles(dt);
         return;
     }
 
@@ -1604,6 +1648,12 @@ function draw() {
         return;
     }
 
+    if (state === 'nameEntry') {
+        drawNameEntry();
+        ctx.restore();
+        return;
+    }
+
     if (state === 'bossIntro') {
         drawBarriers();
         drawPlayer();
@@ -1642,12 +1692,16 @@ function draw() {
         ctx.textAlign = 'center';
         ctx.shadowColor = '#f00';
         ctx.shadowBlur = 30;
-        ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 40);
+        ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 60);
 
         ctx.shadowBlur = 0;
         ctx.fillStyle = '#fff';
         ctx.font = '24px Courier New';
-        ctx.fillText(`FINAL SCORE: ${score}`, canvas.width / 2, canvas.height / 2 + 20);
+        ctx.fillText(`FINAL SCORE: ${score}`, canvas.width / 2, canvas.height / 2 - 10);
+
+        ctx.fillStyle = '#0ff';
+        ctx.font = '16px Courier New';
+        ctx.fillText(`WAVE ${wave}`, canvas.width / 2, canvas.height / 2 + 20);
 
         if (score >= highScore && score > 0) {
             ctx.fillStyle = '#ff0';
@@ -1657,7 +1711,10 @@ function draw() {
 
         ctx.fillStyle = '#888';
         ctx.font = '18px Courier New';
-        ctx.fillText('Press ENTER to play again', canvas.width / 2, canvas.height / 2 + 100);
+        ctx.fillText('Press ENTER to play again', canvas.width / 2, canvas.height / 2 + 90);
+
+        // Leaderboard
+        drawLeaderboardGameOver();
 
         ctx.restore();
         return;
@@ -1737,6 +1794,240 @@ function drawPauseOverlay() {
     ctx.fillStyle = '#888';
     ctx.font = '14px Courier New';
     ctx.fillText('Press P to resume | ESC for main menu', cx, menuY + btnH + 30);
+
+    ctx.restore();
+}
+
+// --- Name Entry Screen ---
+function drawNameEntry() {
+    // Draw game elements behind (frozen)
+    drawBarriers();
+    for (const a of aliens) drawAlien(a);
+    drawBoss();
+    drawUFO();
+    drawParticles();
+    drawHUD();
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    // Title
+    ctx.save();
+    ctx.shadowColor = '#ff0';
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = '#ff0';
+    ctx.font = 'bold 42px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('NEW HIGH SCORE!', cx, cy - 120);
+    ctx.shadowBlur = 0;
+
+    // Score display
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 28px Courier New';
+    ctx.fillText(`${score}`, cx, cy - 75);
+
+    // Prompt
+    ctx.fillStyle = '#0ff';
+    ctx.font = 'bold 22px Courier New';
+    ctx.fillText('ENTER YOUR NAME:', cx, cy - 30);
+
+    // Name input box
+    const boxW = 320;
+    const boxH = 50;
+    const boxX = cx - boxW / 2;
+    const boxY = cy - 10;
+
+    // Box background
+    ctx.fillStyle = 'rgba(0,20,40,0.9)';
+    ctx.strokeStyle = '#0ff';
+    ctx.lineWidth = 2;
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+    // Name text
+    nameEntryCursorBlink += 0.05;
+    const displayName = nameEntryText || '';
+    const cursorVisible = Math.sin(nameEntryCursorBlink * 3) > 0;
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 28px Courier New';
+    ctx.textAlign = 'center';
+    const textWithCursor = displayName + (cursorVisible ? '_' : ' ');
+    ctx.fillText(textWithCursor, cx, boxY + 35);
+
+    // Instructions
+    ctx.fillStyle = '#888';
+    ctx.font = '16px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('Type your name and press ENTER to confirm', cx, boxY + boxH + 35);
+
+    ctx.fillStyle = '#555';
+    ctx.font = '14px Courier New';
+    ctx.fillText(`(${MAX_NAME_LENGTH} chars max | Default: PLAYER)`, cx, boxY + boxH + 58);
+
+    ctx.restore();
+}
+
+// --- Leaderboard Display (Game Over screen) ---
+function drawLeaderboardGameOver() {
+    const board = getLeaderboard();
+    if (board.length === 0) return;
+
+    const cx = canvas.width / 2;
+    const startY = canvas.height / 2 + 130;
+    const lineH = 26;
+    const panelW = 380;
+    const panelH = 50 + board.length * lineH;
+    const panelX = cx - panelW / 2;
+    const panelY = startY - 10;
+
+    ctx.save();
+
+    // Panel background
+    ctx.fillStyle = 'rgba(10,10,30,0.85)';
+    ctx.strokeStyle = 'rgba(255,215,0,0.4)';
+    ctx.lineWidth = 2;
+    const rr = 10;
+    ctx.beginPath();
+    ctx.moveTo(panelX + rr, panelY);
+    ctx.lineTo(panelX + panelW - rr, panelY);
+    ctx.arcTo(panelX + panelW, panelY, panelX + panelW, panelY + rr, rr);
+    ctx.lineTo(panelX + panelW, panelY + panelH - rr);
+    ctx.arcTo(panelX + panelW, panelY + panelH, panelX + panelW - rr, panelY + panelH, rr);
+    ctx.lineTo(panelX + rr, panelY + panelH);
+    ctx.arcTo(panelX, panelY + panelH, panelX, panelY + panelH - rr, rr);
+    ctx.lineTo(panelX, panelY + rr);
+    ctx.arcTo(panelX, panelY, panelX + rr, panelY, rr);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Title
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 20px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('TOP 10 LEADERBOARD', cx, startY + 18);
+    ctx.shadowBlur = 0;
+
+    // Divider
+    ctx.strokeStyle = 'rgba(255,215,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 20, startY + 28);
+    ctx.lineTo(panelX + panelW - 20, startY + 28);
+    ctx.stroke();
+
+    // Entries
+    for (let i = 0; i < board.length; i++) {
+        const entry = board[i];
+        const ly = startY + 50 + i * lineH;
+
+        // Rank color
+        if (i === 0) ctx.fillStyle = '#FFD700';      // Gold
+        else if (i === 1) ctx.fillStyle = '#C0C0C0';  // Silver
+        else if (i === 2) ctx.fillStyle = '#CD7F32';  // Bronze
+        else ctx.fillStyle = '#ffffff';
+
+        ctx.font = 'bold 16px Courier New';
+        ctx.textAlign = 'right';
+        const rank = `${i + 1}.`;
+        ctx.fillText(rank, panelX + 50, ly);
+
+        ctx.textAlign = 'left';
+        ctx.font = '16px Courier New';
+        const name = entry.name.substring(0, MAX_NAME_LENGTH);
+        ctx.fillText(name, panelX + 60, ly);
+
+        ctx.textAlign = 'right';
+        ctx.font = 'bold 16px Courier New';
+        ctx.fillText(`${entry.score}`, panelX + panelW - 20, ly);
+    }
+
+    ctx.restore();
+}
+
+// --- Leaderboard Display (Menu screen, top 5) ---
+function drawLeaderboardMenu(panelBottomY) {
+    const board = getLeaderboard();
+    if (board.length === 0) return;
+
+    const top5 = board.slice(0, 5);
+    const cx = canvas.width / 2;
+    const lineH = 24;
+    const panelW = 340;
+    const headingH = 32;
+    const padTop = 14;
+    const padBot = 14;
+    const panelH = headingH + padTop + padBot + top5.length * lineH;
+    const panelX = cx - panelW / 2;
+    const panelY = panelBottomY + 15;
+    const rr = 12;
+
+    ctx.save();
+
+    // Panel background
+    ctx.fillStyle = 'rgba(10,10,30,0.75)';
+    ctx.strokeStyle = 'rgba(255,215,0,0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(panelX + rr, panelY);
+    ctx.lineTo(panelX + panelW - rr, panelY);
+    ctx.arcTo(panelX + panelW, panelY, panelX + panelW, panelY + rr, rr);
+    ctx.lineTo(panelX + panelW, panelY + panelH - rr);
+    ctx.arcTo(panelX + panelW, panelY + panelH, panelX + panelW - rr, panelY + panelH, rr);
+    ctx.lineTo(panelX + rr, panelY + panelH);
+    ctx.arcTo(panelX, panelY + panelH, panelX, panelY + panelH - rr, rr);
+    ctx.lineTo(panelX, panelY + rr);
+    ctx.arcTo(panelX, panelY, panelX + rr, panelY, rr);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Title
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 18px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('LEADERBOARD', cx, panelY + padTop + 16);
+    ctx.shadowBlur = 0;
+
+    // Divider
+    ctx.strokeStyle = 'rgba(255,215,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 20, panelY + padTop + 26);
+    ctx.lineTo(panelX + panelW - 20, panelY + padTop + 26);
+    ctx.stroke();
+
+    // Entries
+    for (let i = 0; i < top5.length; i++) {
+        const entry = top5[i];
+        const ly = panelY + padTop + headingH + 18 + i * lineH;
+
+        if (i === 0) ctx.fillStyle = '#FFD700';
+        else if (i === 1) ctx.fillStyle = '#C0C0C0';
+        else if (i === 2) ctx.fillStyle = '#CD7F32';
+        else ctx.fillStyle = '#ffffff';
+
+        ctx.font = 'bold 14px Courier New';
+        ctx.textAlign = 'right';
+        ctx.fillText(`${i + 1}.`, panelX + 40, ly);
+
+        ctx.textAlign = 'left';
+        ctx.font = '14px Courier New';
+        ctx.fillText(entry.name.substring(0, MAX_NAME_LENGTH), panelX + 50, ly);
+
+        ctx.textAlign = 'right';
+        ctx.font = 'bold 14px Courier New';
+        ctx.fillText(`${entry.score}`, panelX + panelW - 20, ly);
+    }
 
     ctx.restore();
 }
@@ -1874,10 +2165,40 @@ function drawMenu() {
     ctx.font = '12px Courier New';
     ctx.textAlign = 'center';
     ctx.fillText('Boss fights every 5 waves | Collect power-ups | Build combos!', cx, panelY + panelH + 100);
+
+    // Leaderboard top 5 on menu
+    drawLeaderboardMenu(panelY + panelH + 110);
 }
 
 // --- Input Handlers ---
 window.addEventListener('keydown', function(e) {
+    // --- Name Entry input handling ---
+    if (state === 'nameEntry') {
+        e.preventDefault();
+        if (e.key === 'Enter') {
+            // Confirm name
+            const finalName = nameEntryText.trim() || 'PLAYER';
+            addToLeaderboard(finalName, score);
+            state = 'gameover';
+            return;
+        }
+        if (e.key === 'Backspace') {
+            nameEntryText = nameEntryText.slice(0, -1);
+            return;
+        }
+        if (e.key === 'Escape') {
+            // Submit default name and go to game over
+            addToLeaderboard('PLAYER', score);
+            state = 'gameover';
+            return;
+        }
+        // Only allow letters, numbers, spaces, dash, underscore
+        if (e.key.length === 1 && /[a-zA-Z0-9 _\-]/.test(e.key) && nameEntryText.length < MAX_NAME_LENGTH) {
+            nameEntryText += e.key.toUpperCase();
+        }
+        return; // Block all other handlers during name entry
+    }
+
     if (e.key === 'Enter') {
         if (state === 'menu' || state === 'gameover') {
             startGame();
