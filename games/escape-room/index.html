@@ -1234,12 +1234,13 @@ ctx.fillStyle='#8af';ctx.font=`${Math.min(20,W*0.02)}px 'Segoe UI', Arial`;
 ctx.fillText("Jake's Arcade",W/2,H*0.17);
 ctx.fillStyle='#888';ctx.font=`${Math.min(16,W*0.016)}px Arial`;
 ctx.fillText('Can you escape all 5 rooms?',W/2,H*0.22);
-// Room cards
-const cardW=Math.min(W*0.8,700),cardH=H*0.11;
-const startY=H*0.28;
+// Room cards — compact layout to make room for controls panel
+const cardW=Math.min(W*0.8,700),cardH=H*0.08;
+const cardGap=H*0.015;
+const startY=H*0.26;
 menuHover=-1;
 for(let i=0;i<5;i++){
-const cy=startY+i*(cardH+H*0.02);
+const cy=startY+i*(cardH+cardGap);
 const isHover=mouseX>W/2-cardW/2&&mouseX<W/2+cardW/2&&mouseY>cy&&mouseY<cy+cardH;
 if(isHover)menuHover=i;
 const done=roomCompleted['room'+i];
@@ -1251,34 +1252,102 @@ ctx.strokeRect(W/2-cardW/2,cy,cardW,cardH);
 // Difficulty badge
 const diffColors={'Easy':'#4a4','Medium':'#ca4','Hard':'#c44'};
 ctx.fillStyle=diffColors[roomDefs[i].difficulty]||'#888';
-ctx.fillRect(W/2-cardW/2+10,cy+8,60,20);
+ctx.fillRect(W/2-cardW/2+10,cy+6,60,20);
 ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(12,W*0.012)}px Arial`;
-ctx.textAlign='center';ctx.fillText(roomDefs[i].difficulty,W/2-cardW/2+40,cy+22);
+ctx.textAlign='center';ctx.fillText(roomDefs[i].difficulty,W/2-cardW/2+40,cy+20);
 // Room name
-ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(20,W*0.02)}px Arial`;
-ctx.textAlign='left';ctx.fillText('Room '+(i+1)+': '+roomDefs[i].name,W/2-cardW/2+80,cy+24);
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(18,W*0.018)}px Arial`;
+ctx.textAlign='left';ctx.fillText('Room '+(i+1)+': '+roomDefs[i].name,W/2-cardW/2+80,cy+20);
 // Description
-ctx.fillStyle='#aaa';ctx.font=`${Math.min(13,W*0.013)}px Arial`;
-ctx.fillText(roomDefs[i].desc,W/2-cardW/2+80,cy+cardH-14);
+ctx.fillStyle='#aaa';ctx.font=`${Math.min(12,W*0.012)}px Arial`;
+ctx.fillText(roomDefs[i].desc,W/2-cardW/2+80,cy+cardH-10);
 // Status
 ctx.textAlign='right';
 if(done){
-ctx.fillStyle='#2a2';ctx.font=`bold ${Math.min(14,W*0.014)}px Arial`;
-ctx.fillText('COMPLETED',W/2+cardW/2-15,cy+22);
+ctx.fillStyle='#2a2';ctx.font=`bold ${Math.min(13,W*0.013)}px Arial`;
+ctx.fillText('COMPLETED',W/2+cardW/2-15,cy+20);
 if(bestTimes['room'+i]){
 const bt=Math.floor(bestTimes['room'+i]);
 const m=Math.floor(bt/60),s=bt%60;
-ctx.fillStyle='#8af';ctx.font=`${Math.min(12,W*0.012)}px monospace`;
-ctx.fillText('Best: '+m+':'+(s<10?'0':'')+s,W/2+cardW/2-15,cy+cardH-14);
+ctx.fillStyle='#8af';ctx.font=`${Math.min(11,W*0.011)}px monospace`;
+ctx.fillText('Best: '+m+':'+(s<10?'0':'')+s,W/2+cardW/2-15,cy+cardH-10);
 }
 }else{
-ctx.fillStyle='#888';ctx.font=`${Math.min(13,W*0.013)}px Arial`;
-ctx.fillText('Not completed',W/2+cardW/2-15,cy+22);
+ctx.fillStyle='#888';ctx.font=`${Math.min(12,W*0.012)}px Arial`;
+ctx.fillText('Not completed',W/2+cardW/2-15,cy+20);
 }
 ctx.textAlign='left';
 }
-// Reset button
-const rbx=W/2-50,rby=H*0.92,rbw=100,rbh=30;
+
+// ── CONTROLS PANEL ──────────────────────────────────────────────
+const cpW=Math.min(W*0.75,620);
+const cpX=W/2-cpW/2;
+const cpY=startY+5*(cardH+cardGap)+H*0.02;
+const cpPad=16;
+const ctrlFontSize=Math.max(16,Math.min(18,W*0.018));
+const headFontSize=Math.max(18,Math.min(22,W*0.022));
+const lineH=ctrlFontSize+12;
+const controls=[
+{key:'Click',desc:'Interact with objects in the room'},
+{key:'Click item',desc:'Select from your inventory'},
+{key:'Hint button',desc:'Get a clue (3 per room)'},
+{key:'P',desc:'Pause the game'},
+{key:'ESC',desc:'Return to main menu'}
+];
+const cpH=cpPad+headFontSize+14+controls.length*lineH+cpPad;
+
+// Panel background — semi-transparent dark box with rounded feel
+ctx.fillStyle='rgba(10,8,26,0.85)';
+ctx.beginPath();
+const cr=10;
+ctx.moveTo(cpX+cr,cpY);ctx.lineTo(cpX+cpW-cr,cpY);ctx.quadraticCurveTo(cpX+cpW,cpY,cpX+cpW,cpY+cr);
+ctx.lineTo(cpX+cpW,cpY+cpH-cr);ctx.quadraticCurveTo(cpX+cpW,cpY+cpH,cpX+cpW-cr,cpY+cpH);
+ctx.lineTo(cpX+cr,cpY+cpH);ctx.quadraticCurveTo(cpX,cpY+cpH,cpX,cpY+cpH-cr);
+ctx.lineTo(cpX,cpY+cr);ctx.quadraticCurveTo(cpX,cpY,cpX+cr,cpY);
+ctx.closePath();ctx.fill();
+// Panel border
+ctx.strokeStyle='rgba(255,215,0,0.35)';ctx.lineWidth=2;ctx.stroke();
+
+// Heading
+ctx.fillStyle='#FFD700';
+ctx.font=`bold ${headFontSize}px 'Segoe UI', Arial`;
+ctx.textAlign='center';
+ctx.fillText('CONTROLS',W/2,cpY+cpPad+headFontSize-2);
+
+// Thin separator line under heading
+ctx.strokeStyle='rgba(255,215,0,0.25)';ctx.lineWidth=1;
+ctx.beginPath();ctx.moveTo(cpX+cpPad,cpY+cpPad+headFontSize+6);ctx.lineTo(cpX+cpW-cpPad,cpY+cpPad+headFontSize+6);ctx.stroke();
+
+// Control entries — two-column: gold key on left, white description on right
+const entryStartY=cpY+cpPad+headFontSize+14;
+const keyColX=cpX+cpPad+10;
+const descColX=cpX+cpPad+Math.max(130,cpW*0.28);
+for(let i=0;i<controls.length;i++){
+const ey=entryStartY+i*lineH+ctrlFontSize;
+// Key label in gold with a subtle pill background
+const keyText=controls[i].key;
+ctx.font=`bold ${ctrlFontSize}px 'Segoe UI', Arial`;
+const keyW=ctx.measureText(keyText).width;
+ctx.fillStyle='rgba(255,215,0,0.12)';
+const pillPad=6;
+ctx.beginPath();
+const pr=5;const px=keyColX-pillPad,py=ey-ctrlFontSize+2,pw=keyW+pillPad*2,ph=ctrlFontSize+4;
+ctx.moveTo(px+pr,py);ctx.lineTo(px+pw-pr,py);ctx.quadraticCurveTo(px+pw,py,px+pw,py+pr);
+ctx.lineTo(px+pw,py+ph-pr);ctx.quadraticCurveTo(px+pw,py+ph,px+pw-pr,py+ph);
+ctx.lineTo(px+pr,py+ph);ctx.quadraticCurveTo(px,py+ph,px,py+ph-pr);
+ctx.lineTo(px,py+pr);ctx.quadraticCurveTo(px,py,px+pr,py);
+ctx.closePath();ctx.fill();
+// Key text
+ctx.fillStyle='#FFD700';ctx.textAlign='left';
+ctx.fillText(keyText,keyColX,ey);
+// Description in white
+ctx.fillStyle='#ddd';ctx.font=`${ctrlFontSize}px 'Segoe UI', Arial`;
+ctx.fillText(controls[i].desc,descColX,ey);
+}
+ctx.textAlign='left';
+
+// Reset button — positioned below controls panel
+const rbx=W/2-50,rby=cpY+cpH+H*0.02,rbw=100,rbh=30;
 const rbHover=mouseX>rbx&&mouseX<rbx+rbw&&mouseY>rby&&mouseY<rby+rbh;
 menuBtnHover=rbHover?'reset':'';
 ctx.fillStyle=rbHover?'rgba(150,50,50,0.8)':'rgba(80,30,30,0.6)';
@@ -1353,15 +1422,23 @@ paused=false;window.location.href='../../index.html';
 return;
 }
 if(state==='menu'){
-const cardW=Math.min(W*0.8,700),cardH=H*0.11,startY=H*0.28;
+const cardW=Math.min(W*0.8,700),cardH=H*0.08,startY=H*0.26;
+const cardGap=H*0.015;
 for(let i=0;i<5;i++){
-const cy=startY+i*(cardH+H*0.02);
+const cy=startY+i*(cardH+cardGap);
 if(x>W/2-cardW/2&&x<W/2+cardW/2&&y>cy&&y<cy+cardH){
 sfxClick();initRoom(i);return;
 }
 }
-// Reset
-const rbx=W/2-50,rby=H*0.92,rbw=100,rbh=30;
+// Reset — compute position to match drawMenu
+const cpW2=Math.min(W*0.75,620);
+const ctrlFontSize2=Math.max(16,Math.min(18,W*0.018));
+const headFontSize2=Math.max(18,Math.min(22,W*0.022));
+const lineH2=ctrlFontSize2+12;
+const cpPad2=16;
+const cpY2=startY+5*(cardH+cardGap)+H*0.02;
+const cpH2=cpPad2+headFontSize2+14+5*lineH2+cpPad2;
+const rbx=W/2-50,rby=cpY2+cpH2+H*0.02,rbw=100,rbh=30;
 if(x>rbx&&x<rbx+rbw&&y>rby&&y<rby+rbh){
 if(confirm('Reset all progress?')){
 bestTimes={};roomCompleted={};
