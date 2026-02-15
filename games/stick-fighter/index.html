@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Stick Fighter - Jake's Arcade</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; }
-canvas { display: block; }
+canvas { display: block; touch-action: none; }
 #backLink {
     position: fixed; top: 12px; left: 16px; z-index: 100;
     color: #aaa; text-decoration: none; font-size: 14px;
@@ -39,6 +39,420 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+
+// ---- Touch Device Detection ----
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+// ---- Touch Controls System ----
+let touchButtons = [];
+let touchKeyboardKeys = [];
+let touchKeyboardVisible = false;
+let touchButtonsBuilt = false;
+
+function buildTouchButtons() {
+    touchButtons = [];
+    if (!isTouchDevice) return;
+    const W = canvas.width;
+    const H = canvas.height;
+    const bw = Math.max(52, Math.min(70, W * 0.09));
+    const bh = bw;
+    const pad = 10;
+    // Center row of the D-pad, leave room for jump above and crouch below
+    const midY = H - bh * 2 - pad - 15;
+
+    // Left side - movement (D-pad layout: jump on top, left/right middle, crouch bottom)
+    touchButtons.push({ id: 'left', x: 20, y: midY, w: bw, h: bh, label: '\u25C0', pressed: false });
+    touchButtons.push({ id: 'right', x: 20 + bw + pad, y: midY, w: bw, h: bh, label: '\u25B6', pressed: false });
+    touchButtons.push({ id: 'jump', x: 20 + (bw + pad) / 2, y: midY - bh - pad, w: bw, h: bh, label: '\u25B2', pressed: false });
+    touchButtons.push({ id: 'crouch', x: 20 + (bw + pad) / 2, y: midY + bh + pad, w: bw, h: bh, label: '\u25BC', pressed: false });
+
+    // Right side - attacks (2x2 grid, aligned with D-pad vertically)
+    const rBaseX = W - 20 - bw * 2 - pad;
+    touchButtons.push({ id: 'punch', x: rBaseX, y: midY - bh / 2 - pad / 2, w: bw, h: bh, label: 'P', pressed: false, color: '#44aaff' });
+    touchButtons.push({ id: 'kick', x: rBaseX + bw + pad, y: midY - bh / 2 - pad / 2, w: bw, h: bh, label: 'K', pressed: false, color: '#ff6644' });
+    touchButtons.push({ id: 'special', x: rBaseX, y: midY + bh / 2 + pad / 2, w: bw, h: bh, label: 'S', pressed: false, color: '#ffdd00' });
+    touchButtons.push({ id: 'block', x: rBaseX + bw + pad, y: midY + bh / 2 + pad / 2, w: bw, h: bh, label: 'B', pressed: false, color: '#44cc44' });
+
+    touchButtonsBuilt = true;
+}
+
+function buildTouchKeyboard() {
+    touchKeyboardKeys = [];
+    if (!isTouchDevice) return;
+    const W = canvas.width;
+    const H = canvas.height;
+    const kbW = Math.min(W - 20, 540);
+    const kbStartX = (W - kbW) / 2;
+    const keySize = Math.max(36, Math.min(46, kbW / 12));
+    const keyPad = 4;
+    const kbStartY = H * 0.54;
+
+    const rows = [
+        ['Q','W','E','R','T','Y','U','I','O','P'],
+        ['A','S','D','F','G','H','J','K','L'],
+        ['Z','X','C','V','B','N','M']
+    ];
+
+    for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
+        const rowW = row.length * (keySize + keyPad) - keyPad;
+        const offsetX = (kbW - rowW) / 2;
+        for (let c = 0; c < row.length; c++) {
+            touchKeyboardKeys.push({
+                id: 'key_' + row[c],
+                char: row[c],
+                x: kbStartX + offsetX + c * (keySize + keyPad),
+                y: kbStartY + r * (keySize + keyPad),
+                w: keySize,
+                h: keySize,
+                pressed: false
+            });
+        }
+    }
+
+    // Number row above letters
+    const numRow = ['1','2','3','4','5','6','7','8','9','0'];
+    const numRowW = numRow.length * (keySize + keyPad) - keyPad;
+    const numOffsetX = (kbW - numRowW) / 2;
+    for (let c = 0; c < numRow.length; c++) {
+        touchKeyboardKeys.push({
+            id: 'key_' + numRow[c],
+            char: numRow[c],
+            x: kbStartX + numOffsetX + c * (keySize + keyPad),
+            y: kbStartY - (keySize + keyPad),
+            w: keySize,
+            h: keySize,
+            pressed: false
+        });
+    }
+
+    // Bottom row: SPACE, BACKSPACE, ENTER
+    const bottomRowY = kbStartY + 3 * (keySize + keyPad);
+    const spaceW = keySize * 4 + keyPad * 3;
+    const bkspW = keySize * 2.5 + keyPad;
+    const enterW = keySize * 2.5 + keyPad;
+    const totalBottomW = spaceW + keyPad + bkspW + keyPad + enterW;
+    const bottomOffsetX = (kbW - totalBottomW) / 2;
+
+    touchKeyboardKeys.push({
+        id: 'key_BACKSPACE', char: 'BKSP',
+        x: kbStartX + bottomOffsetX,
+        y: bottomRowY, w: bkspW, h: keySize, pressed: false, special: true
+    });
+    touchKeyboardKeys.push({
+        id: 'key_SPACE', char: 'SPACE',
+        x: kbStartX + bottomOffsetX + bkspW + keyPad,
+        y: bottomRowY, w: spaceW, h: keySize, pressed: false, special: true
+    });
+    touchKeyboardKeys.push({
+        id: 'key_ENTER', char: 'OK',
+        x: kbStartX + bottomOffsetX + bkspW + keyPad + spaceW + keyPad,
+        y: bottomRowY, w: enterW, h: keySize, pressed: false, special: true
+    });
+}
+
+function getCanvasCoords(touch) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+}
+
+function updateTouchButtons(touches) {
+    // Reset all buttons
+    touchButtons.forEach(b => b.pressed = false);
+    // Check each active touch against gameplay buttons
+    for (let i = 0; i < touches.length; i++) {
+        const pos = getCanvasCoords(touches[i]);
+        touchButtons.forEach(b => {
+            if (pos.x >= b.x && pos.x <= b.x + b.w && pos.y >= b.y && pos.y <= b.y + b.h) {
+                b.pressed = true;
+            }
+        });
+    }
+    // Map button presses to P1 key states
+    keys['KeyA'] = touchButtons.find(b => b.id === 'left')?.pressed || false;
+    keys['KeyD'] = touchButtons.find(b => b.id === 'right')?.pressed || false;
+    keys['KeyW'] = touchButtons.find(b => b.id === 'jump')?.pressed || false;
+    keys['KeyS'] = touchButtons.find(b => b.id === 'crouch')?.pressed || false;
+    keys['KeyF'] = touchButtons.find(b => b.id === 'punch')?.pressed || false;
+    keys['KeyG'] = touchButtons.find(b => b.id === 'kick')?.pressed || false;
+    keys['KeyR'] = touchButtons.find(b => b.id === 'special')?.pressed || false;
+    // Block = move away from opponent (backing up)
+    const blockBtn = touchButtons.find(b => b.id === 'block');
+    if (blockBtn && blockBtn.pressed && typeof player1 !== 'undefined' && typeof player2 !== 'undefined') {
+        // Block by moving away from opponent
+        if (player1.facingRight) {
+            keys['KeyA'] = true;
+        } else {
+            keys['KeyD'] = true;
+        }
+    }
+}
+
+function drawTouchButtons() {
+    if (!isTouchDevice) return;
+    if (gameState !== 'fighting' && gameState !== 'countdown' && gameState !== 'roundEnd') return;
+
+    for (const b of touchButtons) {
+        ctx.save();
+        ctx.globalAlpha = b.pressed ? 0.7 : 0.35;
+
+        // Button background
+        const btnColor = b.color || '#ffffff';
+        ctx.fillStyle = b.pressed ? btnColor : 'rgba(255,255,255,0.15)';
+        ctx.beginPath();
+        const r = 10;
+        ctx.moveTo(b.x + r, b.y);
+        ctx.lineTo(b.x + b.w - r, b.y);
+        ctx.quadraticCurveTo(b.x + b.w, b.y, b.x + b.w, b.y + r);
+        ctx.lineTo(b.x + b.w, b.y + b.h - r);
+        ctx.quadraticCurveTo(b.x + b.w, b.y + b.h, b.x + b.w - r, b.y + b.h);
+        ctx.lineTo(b.x + r, b.y + b.h);
+        ctx.quadraticCurveTo(b.x, b.y + b.h, b.x, b.y + b.h - r);
+        ctx.lineTo(b.x, b.y + r);
+        ctx.quadraticCurveTo(b.x, b.y, b.x + r, b.y);
+        ctx.closePath();
+        ctx.fill();
+
+        // Button border
+        ctx.strokeStyle = btnColor;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = b.pressed ? 0.9 : 0.5;
+        ctx.stroke();
+
+        // Label
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = b.pressed ? 1.0 : 0.7;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `bold ${Math.max(16, b.w * 0.4)}px Arial`;
+        ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2);
+
+        ctx.restore();
+    }
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+}
+
+function drawTouchKeyboard() {
+    if (!isTouchDevice || !touchKeyboardVisible) return;
+    if (gameState !== 'nameEntry') return;
+
+    for (const k of touchKeyboardKeys) {
+        ctx.save();
+        ctx.globalAlpha = k.pressed ? 0.8 : 0.5;
+
+        // Key background
+        ctx.fillStyle = k.pressed ? '#555' : (k.special ? '#333' : '#222');
+        ctx.beginPath();
+        const r = 6;
+        ctx.moveTo(k.x + r, k.y);
+        ctx.lineTo(k.x + k.w - r, k.y);
+        ctx.quadraticCurveTo(k.x + k.w, k.y, k.x + k.w, k.y + r);
+        ctx.lineTo(k.x + k.w, k.y + k.h - r);
+        ctx.quadraticCurveTo(k.x + k.w, k.y + k.h, k.x + k.w - r, k.y + k.h);
+        ctx.lineTo(k.x + r, k.y + k.h);
+        ctx.quadraticCurveTo(k.x, k.y + k.h, k.x, k.y + k.h - r);
+        ctx.lineTo(k.x, k.y + r);
+        ctx.quadraticCurveTo(k.x, k.y, k.x + r, k.y);
+        ctx.closePath();
+        ctx.fill();
+
+        // Border
+        ctx.strokeStyle = '#666';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Label
+        ctx.fillStyle = k.special ? '#FFD700' : '#fff';
+        ctx.globalAlpha = k.pressed ? 1.0 : 0.85;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const fontSize = k.special ? Math.max(12, k.h * 0.35) : Math.max(14, k.h * 0.45);
+        ctx.font = `bold ${fontSize}px Arial`;
+        ctx.fillText(k.char, k.x + k.w / 2, k.y + k.h / 2);
+
+        ctx.restore();
+    }
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+}
+
+function handleTouchKeyboardTap(pos) {
+    if (!touchKeyboardVisible || gameState !== 'nameEntry' || !nameEntryActive) return false;
+    for (const k of touchKeyboardKeys) {
+        if (pos.x >= k.x && pos.x <= k.x + k.w && pos.y >= k.y && pos.y <= k.y + k.h) {
+            k.pressed = true;
+            setTimeout(() => { k.pressed = false; }, 120);
+            if (k.id === 'key_ENTER') {
+                const finalName = nameEntryText.trim() || 'PLAYER';
+                addToLeaderboard(finalName, matchWinnerScore);
+                nameEntryActive = false;
+                touchKeyboardVisible = false;
+                gameState = 'matchEnd';
+                matchEndTimer = 61;
+            } else if (k.id === 'key_BACKSPACE') {
+                nameEntryText = nameEntryText.slice(0, -1);
+            } else if (k.id === 'key_SPACE') {
+                if (nameEntryText.length < 12) {
+                    nameEntryText += ' ';
+                }
+            } else {
+                if (nameEntryText.length < 12) {
+                    nameEntryText += k.char;
+                }
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+// Touch event handlers for gameplay
+if (isTouchDevice) {
+    canvas.addEventListener('touchstart', function(e) {
+        e.preventDefault();
+        ensureAudio();
+        const pos = getCanvasCoords(e.changedTouches[0]);
+
+        // Handle name entry keyboard
+        if (gameState === 'nameEntry' && touchKeyboardVisible) {
+            if (handleTouchKeyboardTap(pos)) return;
+        }
+
+        // Handle menu touches
+        if (gameState === 'menu') {
+            handleMenuTouch(pos);
+            return;
+        }
+
+        // Handle difficulty select touches
+        if (gameState === 'difficultySelect') {
+            handleDifficultyTouch(pos);
+            return;
+        }
+
+        // Handle match end touches
+        if (gameState === 'matchEnd' && matchEndTimer > 60) {
+            keys['Enter'] = true;
+            setTimeout(() => { keys['Enter'] = false; }, 100);
+            return;
+        }
+
+        // Handle pause menu touches
+        if (paused) {
+            handlePauseTouch(pos);
+            return;
+        }
+
+        // Gameplay touch controls
+        if (gameState === 'fighting' || gameState === 'countdown' || gameState === 'roundEnd') {
+            // Check for pause button tap (top center area)
+            if (pos.y < 60 && pos.x > canvas.width / 2 - 40 && pos.x < canvas.width / 2 + 40) {
+                if (!paused && gameState === 'fighting') {
+                    paused = true;
+                    stateBeforePause = gameState;
+                    return;
+                }
+            }
+            updateTouchButtons(e.touches);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', function(e) {
+        e.preventDefault();
+        if (gameState === 'fighting' || gameState === 'countdown' || gameState === 'roundEnd') {
+            updateTouchButtons(e.touches);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        if (gameState === 'fighting' || gameState === 'countdown' || gameState === 'roundEnd') {
+            updateTouchButtons(e.touches);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchcancel', function(e) {
+        e.preventDefault();
+        if (gameState === 'fighting' || gameState === 'countdown' || gameState === 'roundEnd') {
+            updateTouchButtons(e.touches);
+        }
+    }, { passive: false });
+}
+
+function handleMenuTouch(pos) {
+    const w = canvas.width;
+    const h = canvas.height;
+    const startY = h * 0.55;
+    const menuCount = 1; // Touch only shows 1 menu item (VS CPU)
+
+    for (let i = 0; i < menuCount; i++) {
+        const y = startY + i * 50;
+        if (pos.y >= y - 30 && pos.y <= y + 20 && pos.x >= w * 0.2 && pos.x <= w * 0.8) {
+            playSound('menu_select');
+            gameMode = '1p';
+            gameState = 'difficultySelect';
+            return;
+        }
+    }
+
+    // Also accept a tap anywhere in the lower half of the screen as a general "start" tap
+    if (pos.y >= startY - 50 && pos.y <= startY + 80) {
+        playSound('menu_select');
+        gameMode = '1p';
+        gameState = 'difficultySelect';
+    }
+}
+
+function handleDifficultyTouch(pos) {
+    const w = canvas.width;
+    const h = canvas.height;
+    const startY = h * 0.42;
+
+    for (let i = 0; i < 3; i++) {
+        const y = startY + i * 70;
+        if (pos.y >= y - 35 && pos.y <= y + 30 && pos.x >= w * 0.2 && pos.x <= w * 0.8) {
+            playSound('menu_select');
+            aiDifficulty = i + 1;
+            difficultySelection = i;
+            startMatch();
+            return;
+        }
+    }
+
+    // Back button area (bottom)
+    if (pos.y >= h * 0.88 && pos.y <= h * 0.96) {
+        gameState = 'menu';
+        playSound('menu_move');
+    }
+}
+
+function handlePauseTouch(pos) {
+    const w = canvas.width;
+    const h = canvas.height;
+    const btnW = 260;
+    const btnH = 50;
+    const btnX = w / 2 - btnW / 2;
+    const resumeBtnY = h / 2 + 10;
+    const menuBtnY = h / 2 + 75;
+
+    if (pos.x >= btnX && pos.x <= btnX + btnW && pos.y >= resumeBtnY && pos.y <= resumeBtnY + btnH) {
+        paused = false;
+        gameState = stateBeforePause;
+    }
+    if (pos.x >= btnX && pos.x <= btnX + btnW && pos.y >= menuBtnY && pos.y <= menuBtnY + btnH) {
+        window.location.href = '../../index.html';
+    }
+}
+
+// Rebuild touch buttons on resize
+if (isTouchDevice) {
+    window.addEventListener('resize', function() {
+        buildTouchButtons();
+        if (gameState === 'nameEntry') buildTouchKeyboard();
+    });
+    buildTouchButtons();
+}
 
 // ---- Constants ----
 const GROUND_OFFSET = 80;
@@ -1394,7 +1808,7 @@ function drawMenu() {
     drawMenuFighters(w / 2, titleY + 120);
 
     // Menu options
-    const menuItems = ['1 Player vs CPU', '2 Players'];
+    const menuItems = isTouchDevice ? ['Play vs CPU'] : ['1 Player vs CPU', '2 Players'];
     const startY = h * 0.55;
     ctx.font = `bold ${Math.min(28, w * 0.025)}px Arial`;
 
@@ -1419,7 +1833,11 @@ function drawMenu() {
     // Navigation hint
     ctx.fillStyle = '#666';
     ctx.font = `${Math.min(15, w * 0.013)}px Arial`;
-    ctx.fillText('Use W/S or Up/Down to select, Enter or Space to confirm', w / 2, h * 0.95);
+    if (isTouchDevice) {
+        ctx.fillText('Tap a mode to start', w / 2, h * 0.95);
+    } else {
+        ctx.fillText('Use W/S or Up/Down to select, Enter or Space to confirm', w / 2, h * 0.95);
+    }
 
     // ---- LEADERBOARD PANEL (top 5 on menu) ----
     {
@@ -1435,171 +1853,180 @@ function drawMenu() {
         }
     }
 
-    // ---- CONTROLS PANEL ----
-    const controlsFontSize = Math.max(14, Math.min(18, w * 0.014, h * 0.022));
-    const headingFontSize = Math.max(18, Math.min(24, w * 0.02));
-    const lineHeight = controlsFontSize + 8;
-    const colWidth = Math.min(320, w * 0.34);
+    // ---- CONTROLS PANEL (keyboard only, hidden on touch devices) ----
+    if (isTouchDevice) {
+        // Show a simplified touch controls hint instead
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#555';
+        ctx.font = `${Math.min(16, w * 0.014)}px Arial`;
+        ctx.fillText('Touch controls appear during gameplay', w / 2, startY + 80);
+        ctx.textAlign = 'left';
+    } else {
+        const controlsFontSize = Math.max(14, Math.min(18, w * 0.014, h * 0.022));
+        const headingFontSize = Math.max(18, Math.min(24, w * 0.02));
+        const lineHeight = controlsFontSize + 8;
+        const colWidth = Math.min(320, w * 0.34);
 
-    // Panel dimensions - positioned below menu items with room to breathe
-    const panelW = colWidth * 2 + 60;
-    const panelH = lineHeight * 8 + headingFontSize + 50;
-    const panelX = w / 2 - panelW / 2;
-    // Start panel 80px below last menu item, but clamp so it fits on screen
-    const panelTopIdeal = startY + 50 + 40;
-    const panelY = Math.min(panelTopIdeal, h - panelH - 30);
+        // Panel dimensions - positioned below menu items with room to breathe
+        const panelW = colWidth * 2 + 60;
+        const panelH = lineHeight * 8 + headingFontSize + 50;
+        const panelX = w / 2 - panelW / 2;
+        // Start panel 80px below last menu item, but clamp so it fits on screen
+        const panelTopIdeal = startY + 50 + 40;
+        const panelY = Math.min(panelTopIdeal, h - panelH - 30);
 
-    // Semi-transparent dark panel background
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.beginPath();
-    const r = 12;
-    ctx.moveTo(panelX + r, panelY);
-    ctx.lineTo(panelX + panelW - r, panelY);
-    ctx.quadraticCurveTo(panelX + panelW, panelY, panelX + panelW, panelY + r);
-    ctx.lineTo(panelX + panelW, panelY + panelH - r);
-    ctx.quadraticCurveTo(panelX + panelW, panelY + panelH, panelX + panelW - r, panelY + panelH);
-    ctx.lineTo(panelX + r, panelY + panelH);
-    ctx.quadraticCurveTo(panelX, panelY + panelH, panelX, panelY + panelH - r);
-    ctx.lineTo(panelX, panelY + r);
-    ctx.quadraticCurveTo(panelX, panelY, panelX + r, panelY);
-    ctx.closePath();
-    ctx.fill();
+        // Semi-transparent dark panel background
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.beginPath();
+        const r = 12;
+        ctx.moveTo(panelX + r, panelY);
+        ctx.lineTo(panelX + panelW - r, panelY);
+        ctx.quadraticCurveTo(panelX + panelW, panelY, panelX + panelW, panelY + r);
+        ctx.lineTo(panelX + panelW, panelY + panelH - r);
+        ctx.quadraticCurveTo(panelX + panelW, panelY + panelH, panelX + panelW - r, panelY + panelH);
+        ctx.lineTo(panelX + r, panelY + panelH);
+        ctx.quadraticCurveTo(panelX, panelY + panelH, panelX, panelY + panelH - r);
+        ctx.lineTo(panelX, panelY + r);
+        ctx.quadraticCurveTo(panelX, panelY, panelX + r, panelY);
+        ctx.closePath();
+        ctx.fill();
 
-    // Panel border
-    ctx.strokeStyle = 'rgba(255, 215, 0, 0.3)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+        // Panel border
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
 
-    // "CONTROLS" heading
-    ctx.textAlign = 'center';
-    ctx.font = `bold ${headingFontSize}px Arial`;
-    ctx.fillStyle = '#FFD700';
-    ctx.fillText('CONTROLS', w / 2, panelY + headingFontSize + 14);
-
-    // Divider line under heading
-    ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(panelX + 20, panelY + headingFontSize + 26);
-    ctx.lineTo(panelX + panelW - 20, panelY + headingFontSize + 26);
-    ctx.stroke();
-
-    const contentTopY = panelY + headingFontSize + 46;
-
-    // Helper: draw a control line with gold key and white description
-    function drawControlLine(x, y, key, desc, align) {
-        ctx.textAlign = align;
-        ctx.font = `bold ${controlsFontSize}px Arial`;
+        // "CONTROLS" heading
+        ctx.textAlign = 'center';
+        ctx.font = `bold ${headingFontSize}px Arial`;
         ctx.fillStyle = '#FFD700';
-        const keyText = key;
-        const keyWidth = ctx.measureText(keyText).width;
-        if (align === 'left') {
-            ctx.fillText(keyText, x, y);
-            ctx.font = `${controlsFontSize}px Arial`;
-            ctx.fillStyle = '#ddd';
-            ctx.fillText('  ' + desc, x + keyWidth, y);
-        } else {
-            // Right-aligned: draw desc first then key
-            ctx.font = `${controlsFontSize}px Arial`;
-            ctx.fillStyle = '#ddd';
-            const descWidth = ctx.measureText(desc + '  ').width;
-            ctx.textAlign = 'right';
-            ctx.fillText(desc + '  ', x - 0, y);
+        ctx.fillText('CONTROLS', w / 2, panelY + headingFontSize + 14);
+
+        // Divider line under heading
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(panelX + 20, panelY + headingFontSize + 26);
+        ctx.lineTo(panelX + panelW - 20, panelY + headingFontSize + 26);
+        ctx.stroke();
+
+        const contentTopY = panelY + headingFontSize + 46;
+
+        // Helper: draw a control line with gold key and white description
+        function drawControlLine(x, y, key, desc, align) {
+            ctx.textAlign = align;
             ctx.font = `bold ${controlsFontSize}px Arial`;
             ctx.fillStyle = '#FFD700';
-            ctx.fillText(keyText, x - descWidth, y);
+            const keyText = key;
+            const keyWidth = ctx.measureText(keyText).width;
+            if (align === 'left') {
+                ctx.fillText(keyText, x, y);
+                ctx.font = `${controlsFontSize}px Arial`;
+                ctx.fillStyle = '#ddd';
+                ctx.fillText('  ' + desc, x + keyWidth, y);
+            } else {
+                // Right-aligned: draw desc first then key
+                ctx.font = `${controlsFontSize}px Arial`;
+                ctx.fillStyle = '#ddd';
+                const descWidth = ctx.measureText(desc + '  ').width;
+                ctx.textAlign = 'right';
+                ctx.fillText(desc + '  ', x - 0, y);
+                ctx.font = `bold ${controlsFontSize}px Arial`;
+                ctx.fillStyle = '#FFD700';
+                ctx.fillText(keyText, x - descWidth, y);
+            }
         }
+
+        // --- Player 1 column (left) ---
+        const p1X = panelX + 30;
+        ctx.textAlign = 'left';
+        ctx.font = `bold ${controlsFontSize + 1}px Arial`;
+        ctx.fillStyle = '#4488ff';
+        ctx.fillText('PLAYER 1', p1X, contentTopY);
+
+        const p1Controls = [
+            ['A / D', 'Move left / right'],
+            ['W', 'Jump'],
+            ['S', 'Crouch'],
+            ['F', 'Punch'],
+            ['G', 'Kick'],
+            ['R', 'Special attack'],
+        ];
+        for (let i = 0; i < p1Controls.length; i++) {
+            drawControlLine(p1X, contentTopY + (i + 1) * lineHeight, p1Controls[i][0], p1Controls[i][1], 'left');
+        }
+
+        // --- Player 2 column (right) ---
+        const p2X = panelX + panelW / 2 + 30;
+        ctx.textAlign = 'left';
+        ctx.font = `bold ${controlsFontSize + 1}px Arial`;
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText('PLAYER 2', p2X, contentTopY);
+
+        const p2Controls = [
+            ['Arrows', 'Move left / right'],
+            ['Up', 'Jump'],
+            ['Down', 'Crouch'],
+            ['K', 'Punch'],
+            ['L', 'Kick'],
+            ['O', 'Special attack'],
+        ];
+        for (let i = 0; i < p2Controls.length; i++) {
+            drawControlLine(p2X, contentTopY + (i + 1) * lineHeight, p2Controls[i][0], p2Controls[i][1], 'left');
+        }
+
+        // --- Divider above general controls ---
+        const generalY = contentTopY + 7 * lineHeight + 6;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(panelX + 20, generalY - lineHeight + 6);
+        ctx.lineTo(panelX + panelW - 20, generalY - lineHeight + 6);
+        ctx.stroke();
+
+        // General controls centred on one line
+        ctx.textAlign = 'center';
+        ctx.font = `bold ${controlsFontSize}px Arial`;
+        ctx.fillStyle = '#FFD700';
+        const genLabel1 = 'P';
+        const genDesc1 = ' Pause';
+        const genLabel2 = 'ESC';
+        const genDesc2 = ' Main Menu';
+        const spacer = '        ';
+
+        // Measure full line to centre it
+        ctx.font = `bold ${controlsFontSize}px Arial`;
+        const l1w = ctx.measureText(genLabel1).width;
+        ctx.font = `${controlsFontSize}px Arial`;
+        const d1w = ctx.measureText(genDesc1).width;
+        const spw = ctx.measureText(spacer).width;
+        ctx.font = `bold ${controlsFontSize}px Arial`;
+        const l2w = ctx.measureText(genLabel2).width;
+        ctx.font = `${controlsFontSize}px Arial`;
+        const d2w = ctx.measureText(genDesc2).width;
+
+        const totalW = l1w + d1w + spw + l2w + d2w;
+        let curX = w / 2 - totalW / 2;
+
+        ctx.textAlign = 'left';
+        ctx.font = `bold ${controlsFontSize}px Arial`;
+        ctx.fillStyle = '#FFD700';
+        ctx.fillText(genLabel1, curX, generalY);
+        curX += l1w;
+        ctx.font = `${controlsFontSize}px Arial`;
+        ctx.fillStyle = '#aaa';
+        ctx.fillText(genDesc1, curX, generalY);
+        curX += d1w + spw;
+        ctx.font = `bold ${controlsFontSize}px Arial`;
+        ctx.fillStyle = '#FFD700';
+        ctx.fillText(genLabel2, curX, generalY);
+        curX += l2w;
+        ctx.font = `${controlsFontSize}px Arial`;
+        ctx.fillStyle = '#aaa';
+        ctx.fillText(genDesc2, curX, generalY);
+
+        ctx.textAlign = 'left';
     }
-
-    // --- Player 1 column (left) ---
-    const p1X = panelX + 30;
-    ctx.textAlign = 'left';
-    ctx.font = `bold ${controlsFontSize + 1}px Arial`;
-    ctx.fillStyle = '#4488ff';
-    ctx.fillText('PLAYER 1', p1X, contentTopY);
-
-    const p1Controls = [
-        ['A / D', 'Move left / right'],
-        ['W', 'Jump'],
-        ['S', 'Crouch'],
-        ['F', 'Punch'],
-        ['G', 'Kick'],
-        ['R', 'Special attack'],
-    ];
-    for (let i = 0; i < p1Controls.length; i++) {
-        drawControlLine(p1X, contentTopY + (i + 1) * lineHeight, p1Controls[i][0], p1Controls[i][1], 'left');
-    }
-
-    // --- Player 2 column (right) ---
-    const p2X = panelX + panelW / 2 + 30;
-    ctx.textAlign = 'left';
-    ctx.font = `bold ${controlsFontSize + 1}px Arial`;
-    ctx.fillStyle = '#ff4444';
-    ctx.fillText('PLAYER 2', p2X, contentTopY);
-
-    const p2Controls = [
-        ['Arrows', 'Move left / right'],
-        ['Up', 'Jump'],
-        ['Down', 'Crouch'],
-        ['K', 'Punch'],
-        ['L', 'Kick'],
-        ['O', 'Special attack'],
-    ];
-    for (let i = 0; i < p2Controls.length; i++) {
-        drawControlLine(p2X, contentTopY + (i + 1) * lineHeight, p2Controls[i][0], p2Controls[i][1], 'left');
-    }
-
-    // --- Divider above general controls ---
-    const generalY = contentTopY + 7 * lineHeight + 6;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(panelX + 20, generalY - lineHeight + 6);
-    ctx.lineTo(panelX + panelW - 20, generalY - lineHeight + 6);
-    ctx.stroke();
-
-    // General controls centred on one line
-    ctx.textAlign = 'center';
-    ctx.font = `bold ${controlsFontSize}px Arial`;
-    ctx.fillStyle = '#FFD700';
-    const genLabel1 = 'P';
-    const genDesc1 = ' Pause';
-    const genLabel2 = 'ESC';
-    const genDesc2 = ' Main Menu';
-    const spacer = '        ';
-
-    // Measure full line to centre it
-    ctx.font = `bold ${controlsFontSize}px Arial`;
-    const l1w = ctx.measureText(genLabel1).width;
-    ctx.font = `${controlsFontSize}px Arial`;
-    const d1w = ctx.measureText(genDesc1).width;
-    const spw = ctx.measureText(spacer).width;
-    ctx.font = `bold ${controlsFontSize}px Arial`;
-    const l2w = ctx.measureText(genLabel2).width;
-    ctx.font = `${controlsFontSize}px Arial`;
-    const d2w = ctx.measureText(genDesc2).width;
-
-    const totalW = l1w + d1w + spw + l2w + d2w;
-    let curX = w / 2 - totalW / 2;
-
-    ctx.textAlign = 'left';
-    ctx.font = `bold ${controlsFontSize}px Arial`;
-    ctx.fillStyle = '#FFD700';
-    ctx.fillText(genLabel1, curX, generalY);
-    curX += l1w;
-    ctx.font = `${controlsFontSize}px Arial`;
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(genDesc1, curX, generalY);
-    curX += d1w + spw;
-    ctx.font = `bold ${controlsFontSize}px Arial`;
-    ctx.fillStyle = '#FFD700';
-    ctx.fillText(genLabel2, curX, generalY);
-    curX += l2w;
-    ctx.font = `${controlsFontSize}px Arial`;
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(genDesc2, curX, generalY);
-
-    ctx.textAlign = 'left';
 }
 
 function drawMenuFighters(cx, cy) {
@@ -1688,8 +2115,13 @@ function drawDifficultySelect() {
 
     ctx.fillStyle = '#555';
     ctx.font = `${Math.min(16, w * 0.013)}px Arial`;
-    ctx.fillText('Use W/S or Up/Down to select, Enter or Space to confirm', w / 2, h * 0.88);
-    ctx.fillText('Press Escape to go back', w / 2, h * 0.92);
+    if (isTouchDevice) {
+        ctx.fillText('Tap a difficulty to start', w / 2, h * 0.88);
+        ctx.fillText('Tap here to go back', w / 2, h * 0.92);
+    } else {
+        ctx.fillText('Use W/S or Up/Down to select, Enter or Space to confirm', w / 2, h * 0.88);
+        ctx.fillText('Press Escape to go back', w / 2, h * 0.92);
+    }
 
     ctx.textAlign = 'left';
 }
@@ -1876,6 +2308,9 @@ function drawControls() {
     const h = canvas.height;
 
     if (gameState !== 'fighting' && gameState !== 'countdown') return;
+
+    // On touch devices, draw touch buttons instead of text hints
+    if (isTouchDevice) return;
 
     // Small semi-transparent controls hint at bottom
     ctx.globalAlpha = 0.3;
@@ -2124,22 +2559,25 @@ function update() {
     switch(gameState) {
         case 'menu':
             backLink.style.display = 'block';
-            if (isMenuKeyPressed('KeyW') || isMenuKeyPressed('ArrowUp')) {
-                menuSelection = (menuSelection - 1 + 2) % 2;
-                playSound('menu_move');
-            }
-            if (isMenuKeyPressed('KeyS') || isMenuKeyPressed('ArrowDown')) {
-                menuSelection = (menuSelection + 1) % 2;
-                playSound('menu_move');
-            }
-            if (isMenuKeyPressed('Enter') || isMenuKeyPressed('Space')) {
-                playSound('menu_select');
-                if (menuSelection === 0) {
-                    gameMode = '1p';
-                    gameState = 'difficultySelect';
-                } else {
-                    gameMode = '2p';
-                    startMatch();
+            {
+                const menuCount = isTouchDevice ? 1 : 2;
+                if (isMenuKeyPressed('KeyW') || isMenuKeyPressed('ArrowUp')) {
+                    menuSelection = (menuSelection - 1 + menuCount) % menuCount;
+                    playSound('menu_move');
+                }
+                if (isMenuKeyPressed('KeyS') || isMenuKeyPressed('ArrowDown')) {
+                    menuSelection = (menuSelection + 1) % menuCount;
+                    playSound('menu_move');
+                }
+                if (isMenuKeyPressed('Enter') || isMenuKeyPressed('Space')) {
+                    playSound('menu_select');
+                    if (isTouchDevice || menuSelection === 0) {
+                        gameMode = '1p';
+                        gameState = 'difficultySelect';
+                    } else {
+                        gameMode = '2p';
+                        startMatch();
+                    }
                 }
             }
             break;
@@ -2225,6 +2663,10 @@ function update() {
                             nameEntryActive = true;
                             nameEntryCursorBlink = 0;
                             gameState = 'nameEntry';
+                            if (isTouchDevice) {
+                                buildTouchKeyboard();
+                                touchKeyboardVisible = true;
+                            }
                         } else {
                             gameState = 'matchEnd';
                         }
@@ -2387,7 +2829,7 @@ function draw() {
             ctx.globalAlpha = 0.5 + Math.sin(frameCount * 0.08) * 0.5;
             ctx.fillStyle = '#fff';
             ctx.font = `${Math.min(22, w * 0.02)}px Arial`;
-            ctx.fillText('Press Enter or Space to return to menu', w / 2, h * 0.93);
+            ctx.fillText(isTouchDevice ? 'Tap to return to menu' : 'Press Enter or Space to return to menu', w / 2, h * 0.93);
             ctx.globalAlpha = 1;
         }
         ctx.textAlign = 'left';
@@ -2395,6 +2837,37 @@ function draw() {
 
     // Controls hint
     drawControls();
+
+    // Touch controls overlay
+    drawTouchButtons();
+
+    // Pause button indicator for touch devices
+    if (isTouchDevice && (gameState === 'fighting' || gameState === 'countdown')) {
+        ctx.save();
+        ctx.globalAlpha = 0.3;
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 18px Arial';
+        ctx.fillText('||', w / 2, 20);
+        ctx.restore();
+        ctx.textBaseline = 'alphabetic';
+        ctx.textAlign = 'left';
+    }
+
+    // Touch virtual keyboard for name entry
+    drawTouchKeyboard();
+
+    // Match end touch hint
+    if (isTouchDevice && gameState === 'matchEnd' && matchEndTimer > 60) {
+        ctx.textAlign = 'center';
+        ctx.globalAlpha = 0.5 + Math.sin(frameCount * 0.08) * 0.5;
+        ctx.fillStyle = '#fff';
+        ctx.font = `${Math.min(22, w * 0.02)}px Arial`;
+        ctx.fillText('Tap to return to menu', w / 2, h * 0.97);
+        ctx.globalAlpha = 1;
+        ctx.textAlign = 'left';
+    }
 }
 
 // ---- Name Entry Screen ----
@@ -2463,7 +2936,11 @@ function drawNameEntry() {
     // Hint text
     ctx.fillStyle = '#888';
     ctx.font = `${Math.min(15, w * 0.013)}px Arial`;
-    ctx.fillText('Type your name and press Enter to confirm (ESC to skip)', w / 2, boxY + boxH + 25);
+    if (isTouchDevice) {
+        ctx.fillText('Use the keyboard below to enter your name', w / 2, boxY + boxH + 25);
+    } else {
+        ctx.fillText('Type your name and press Enter to confirm (ESC to skip)', w / 2, boxY + boxH + 25);
+    }
 
     ctx.textAlign = 'left';
 }
@@ -2605,7 +3082,11 @@ function drawPauseOverlay() {
     // Help text
     ctx.fillStyle = '#aaa';
     ctx.font = `${Math.min(16, w * 0.013)}px Arial`;
-    ctx.fillText('Press P to resume | ESC for main menu', w / 2, menuBtnY + btnH + 35);
+    if (isTouchDevice) {
+        ctx.fillText('Tap a button above', w / 2, menuBtnY + btnH + 35);
+    } else {
+        ctx.fillText('Press P to resume | ESC for main menu', w / 2, menuBtnY + btnH + 35);
+    }
 
     ctx.textAlign = 'left';
 }

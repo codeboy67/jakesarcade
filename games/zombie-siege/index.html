@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>ZOMBIE SIEGE</title>
@@ -17,6 +17,10 @@
     overflow: hidden;
     font-family: 'Courier New', monospace;
     cursor: crosshair;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
   canvas {
     display: block;
@@ -41,7 +45,143 @@ function resize() {
   canvas.height = window.innerHeight;
 }
 resize();
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => { resize(); if (isTouchDevice) initJoystick(); });
+
+// ============= TOUCH DEVICE DETECTION =============
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+// ============= VIRTUAL JOYSTICK & TOUCH CONTROLS =============
+let joystick = {
+  active: false, touchId: null,
+  baseX: 0, baseY: 0,
+  thumbX: 0, thumbY: 0,
+  radius: 60, thumbRadius: 25
+};
+
+let touchFire = { active: false, touchId: null };
+let touchMelee = { active: false, touchId: null };
+
+// Touch button definitions (positions set in initJoystick)
+let touchButtons = {
+  fire: { x: 0, y: 0, w: 80, h: 80, label: 'FIRE', color: '#c44' },
+  melee: { x: 0, y: 0, w: 64, h: 64, label: 'MELEE', color: '#44c' },
+  pause: { x: 0, y: 0, w: 50, h: 50, label: 'II', color: '#888' },
+  weapons: [] // filled in initJoystick
+};
+
+// Virtual keyboard state for name entry on touch
+let vkb = {
+  visible: false,
+  keys: [],
+  keyW: 0, keyH: 0,
+  startX: 0, startY: 0,
+  rows: [
+    'QWERTYUIOP',
+    'ASDFGHJKL',
+    'ZXCVBNM',
+    '123456789 0'
+  ]
+};
+
+function initJoystick() {
+  const W = canvas.width;
+  const H = canvas.height;
+
+  // Joystick in lower-left
+  joystick.baseX = 120;
+  joystick.baseY = H - 140;
+  joystick.thumbX = joystick.baseX;
+  joystick.thumbY = joystick.baseY;
+
+  // Fire button lower-right
+  touchButtons.fire.w = 80;
+  touchButtons.fire.h = 80;
+  touchButtons.fire.x = W - 110;
+  touchButtons.fire.y = H - 180;
+
+  // Melee button above fire
+  touchButtons.melee.w = 64;
+  touchButtons.melee.h = 64;
+  touchButtons.melee.x = W - 190;
+  touchButtons.melee.y = H - 150;
+
+  // Pause button top-center-right
+  touchButtons.pause.x = W / 2 + 120;
+  touchButtons.pause.y = 10;
+
+  // Weapon buttons along top
+  touchButtons.weapons = [];
+  for (let i = 0; i < 4; i++) {
+    touchButtons.weapons.push({
+      x: W / 2 - 110 + i * 55,
+      y: 10,
+      w: 48, h: 44,
+      label: (i + 1).toString(),
+      color: '#555'
+    });
+  }
+
+  // Virtual keyboard layout
+  initVirtualKeyboard();
+}
+
+function initVirtualKeyboard() {
+  const W = canvas.width;
+  const H = canvas.height;
+  const kW = Math.min(48, Math.floor((W - 20) / 11));
+  const kH = Math.max(44, Math.floor(kW * 1.1));
+  vkb.keyW = kW;
+  vkb.keyH = kH;
+  vkb.keys = [];
+
+  const totalRows = vkb.rows.length + 1; // +1 for action row (BKSP, SPACE, ENTER)
+  const kbHeight = totalRows * (kH + 6) + 10;
+  vkb.startY = H - kbHeight - 10;
+
+  for (let r = 0; r < vkb.rows.length; r++) {
+    const row = vkb.rows[r];
+    const chars = row.split('');
+    const rowW = chars.length * (kW + 4) - 4;
+    const startX = (W - rowW) / 2;
+    const y = vkb.startY + r * (kH + 6);
+    for (let c = 0; c < chars.length; c++) {
+      const ch = chars[c];
+      vkb.keys.push({
+        x: startX + c * (kW + 4),
+        y: y,
+        w: kW, h: kH,
+        char: ch,
+        label: ch === ' ' ? 'SPC' : ch
+      });
+    }
+  }
+
+  // Action row: BKSP, SPACE, ENTER
+  const actionY = vkb.startY + vkb.rows.length * (kH + 6);
+  const actionKeys = [
+    { char: 'BACKSPACE', label: 'BKSP', w: kW * 2 + 4 },
+    { char: ' ', label: 'SPACE', w: kW * 4 + 12 },
+    { char: 'ENTER', label: 'ENTER', w: kW * 2 + 4 }
+  ];
+  const totalActionW = actionKeys.reduce((s, k) => s + k.w, 0) + (actionKeys.length - 1) * 6;
+  let ax = (W - totalActionW) / 2;
+  for (const ak of actionKeys) {
+    vkb.keys.push({
+      x: ax, y: actionY,
+      w: ak.w, h: kH,
+      char: ak.char,
+      label: ak.label
+    });
+    ax += ak.w + 6;
+  }
+}
+
+if (isTouchDevice) {
+  initJoystick();
+
+  // Hide default cursor on touch devices
+  document.body.style.cursor = 'default';
+}
 
 // ============= AUDIO ENGINE =============
 class AudioEngine {
@@ -286,6 +426,354 @@ canvas.addEventListener('mouseup', e => {
   if (e.button === 2) mouse.rightDown = false;
 });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ============= TOUCH INPUT =============
+if (isTouchDevice) {
+  function pointInRect(px, py, r) {
+    return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+  }
+
+  function pointInCircle(px, py, cx, cy, radius) {
+    return Math.hypot(px - cx, py - cy) <= radius;
+  }
+
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (!audio.enabled) audio.init();
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const tx = t.clientX, ty = t.clientY;
+
+      // --- NAME ENTRY: virtual keyboard ---
+      if (game.state === 'nameEntry' && vkb.keys.length > 0) {
+        for (const vk of vkb.keys) {
+          if (pointInRect(tx, ty, vk)) {
+            if (vk.char === 'ENTER') {
+              game.submitName();
+            } else if (vk.char === 'BACKSPACE') {
+              game.nameEntryText = game.nameEntryText.slice(0, -1);
+            } else if (game.nameEntryText.length < 12) {
+              game.nameEntryText += vk.char.toUpperCase();
+            }
+            return;
+          }
+        }
+        return;
+      }
+
+      // --- MENU STATE ---
+      if (game.state === 'menu') {
+        game.init();
+        return;
+      }
+
+      // --- GAME OVER / LEADERBOARD ---
+      if (game.state === 'gameOverScreen' || game.state === 'leaderboardScreen') {
+        game.init();
+        return;
+      }
+
+      // --- PAUSED ---
+      if (game.state === 'paused') {
+        const rb = game._pauseResumeBtn;
+        const mb = game._pauseMenuBtn;
+        if (rb && pointInRect(tx, ty, rb)) {
+          game.togglePause();
+        } else if (mb && pointInRect(tx, ty, mb)) {
+          window.location.href = '../../index.html';
+        }
+        return;
+      }
+
+      // --- PLAYING / WAVE INTRO ---
+      // Check pause button
+      if (pointInRect(tx, ty, touchButtons.pause)) {
+        game.togglePause();
+        return;
+      }
+
+      // Check weapon buttons
+      let hitWeapon = false;
+      for (let w = 0; w < touchButtons.weapons.length; w++) {
+        const wb = touchButtons.weapons[w];
+        if (pointInRect(tx, ty, wb)) {
+          game.switchWeapon(w);
+          hitWeapon = true;
+          break;
+        }
+      }
+      if (hitWeapon) continue;
+
+      // Check fire button
+      if (pointInRect(tx, ty, touchButtons.fire)) {
+        touchFire.active = true;
+        touchFire.touchId = t.identifier;
+        mouse.down = true;
+        continue;
+      }
+
+      // Check melee button
+      if (pointInRect(tx, ty, touchButtons.melee)) {
+        touchMelee.active = true;
+        touchMelee.touchId = t.identifier;
+        mouse.rightDown = true;
+        continue;
+      }
+
+      // Left half of screen -> joystick
+      if (tx < canvas.width / 2 && !joystick.active) {
+        joystick.active = true;
+        joystick.touchId = t.identifier;
+        // Optionally recenter the joystick base where the touch started
+        joystick.baseX = tx;
+        joystick.baseY = ty;
+        joystick.thumbX = tx;
+        joystick.thumbY = ty;
+      }
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      const tx = t.clientX, ty = t.clientY;
+
+      // Update joystick
+      if (joystick.active && t.identifier === joystick.touchId) {
+        const dx = tx - joystick.baseX;
+        const dy = ty - joystick.baseY;
+        const d = Math.hypot(dx, dy);
+        const maxDist = joystick.radius;
+
+        if (d > maxDist) {
+          joystick.thumbX = joystick.baseX + (dx / d) * maxDist;
+          joystick.thumbY = joystick.baseY + (dy / d) * maxDist;
+        } else {
+          joystick.thumbX = tx;
+          joystick.thumbY = ty;
+        }
+
+        // Map joystick to movement keys
+        const nx = (joystick.thumbX - joystick.baseX) / maxDist;
+        const ny = (joystick.thumbY - joystick.baseY) / maxDist;
+        const deadzone = 0.2;
+
+        keys['w'] = ny < -deadzone;
+        keys['s'] = ny > deadzone;
+        keys['a'] = nx < -deadzone;
+        keys['d'] = nx > deadzone;
+      }
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+
+      // Release joystick
+      if (joystick.active && t.identifier === joystick.touchId) {
+        joystick.active = false;
+        joystick.touchId = null;
+        joystick.thumbX = joystick.baseX;
+        joystick.thumbY = joystick.baseY;
+        keys['w'] = false;
+        keys['s'] = false;
+        keys['a'] = false;
+        keys['d'] = false;
+      }
+
+      // Release fire
+      if (touchFire.active && t.identifier === touchFire.touchId) {
+        touchFire.active = false;
+        touchFire.touchId = null;
+        mouse.down = false;
+      }
+
+      // Release melee
+      if (touchMelee.active && t.identifier === touchMelee.touchId) {
+        touchMelee.active = false;
+        touchMelee.touchId = null;
+        mouse.rightDown = false;
+      }
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchcancel', e => {
+    e.preventDefault();
+    // Reset everything
+    joystick.active = false;
+    joystick.touchId = null;
+    joystick.thumbX = joystick.baseX;
+    joystick.thumbY = joystick.baseY;
+    keys['w'] = false; keys['s'] = false;
+    keys['a'] = false; keys['d'] = false;
+    touchFire.active = false; touchFire.touchId = null;
+    touchMelee.active = false; touchMelee.touchId = null;
+    mouse.down = false;
+    mouse.rightDown = false;
+  }, { passive: false });
+}
+
+// ============= AUTO-AIM FOR TOUCH =============
+function autoAimAtNearest(player, zombies) {
+  if (!isTouchDevice || zombies.length === 0) return;
+  let nearest = null;
+  let nearestDist = Infinity;
+  for (const z of zombies) {
+    if (z.hp <= 0) continue;
+    const d = Math.hypot(z.x - player.x, z.y - player.y);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearest = z;
+    }
+  }
+  if (nearest) {
+    // Set the aim angle and update mouse position so existing logic works
+    const a = Math.atan2(nearest.y - player.y, nearest.x - player.x);
+    mouse.x = player.x + Math.cos(a) * 200;
+    mouse.y = player.y + Math.sin(a) * 200;
+  }
+}
+
+// ============= DRAW TOUCH CONTROLS =============
+function drawTouchControls() {
+  if (!isTouchDevice) return;
+  if (game.state !== 'playing' && game.state !== 'waveIntro') return;
+
+  ctx.save();
+
+  // --- JOYSTICK ---
+  // Base
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(joystick.baseX, joystick.baseY, joystick.radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.5;
+  ctx.stroke();
+
+  // Thumb
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(joystick.thumbX, joystick.thumbY, joystick.thumbRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  // --- FIRE BUTTON ---
+  const fb = touchButtons.fire;
+  ctx.globalAlpha = touchFire.active ? 0.7 : 0.4;
+  ctx.fillStyle = fb.color;
+  ctx.beginPath();
+  ctx.arc(fb.x + fb.w / 2, fb.y + fb.h / 2, fb.w / 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.7;
+  ctx.stroke();
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 16px "Courier New"';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(fb.label, fb.x + fb.w / 2, fb.y + fb.h / 2);
+
+  // --- MELEE BUTTON ---
+  const mb = touchButtons.melee;
+  ctx.globalAlpha = touchMelee.active ? 0.7 : 0.4;
+  ctx.fillStyle = mb.color;
+  ctx.beginPath();
+  ctx.arc(mb.x + mb.w / 2, mb.y + mb.h / 2, mb.w / 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.7;
+  ctx.stroke();
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 12px "Courier New"';
+  ctx.fillText(mb.label, mb.x + mb.w / 2, mb.y + mb.h / 2);
+
+  // --- PAUSE BUTTON ---
+  const pb = touchButtons.pause;
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = pb.color;
+  ctx.fillRect(pb.x, pb.y, pb.w, pb.h);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.6;
+  ctx.strokeRect(pb.x, pb.y, pb.w, pb.h);
+  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 18px "Courier New"';
+  ctx.fillText(pb.label, pb.x + pb.w / 2, pb.y + pb.h / 2);
+
+  // --- WEAPON BUTTONS ---
+  if (game.player) {
+    for (let i = 0; i < touchButtons.weapons.length; i++) {
+      const wb = touchButtons.weapons[i];
+      const hasWeapon = game.player && i < game.player.weapons.length;
+      const isActive = game.player && i === game.player.currentWeapon;
+
+      ctx.globalAlpha = hasWeapon ? (isActive ? 0.6 : 0.35) : 0.15;
+      ctx.fillStyle = isActive ? '#4a6' : '#333';
+      ctx.fillRect(wb.x, wb.y, wb.w, wb.h);
+      ctx.strokeStyle = isActive ? '#fff' : '#666';
+      ctx.lineWidth = isActive ? 2 : 1;
+      ctx.strokeRect(wb.x, wb.y, wb.w, wb.h);
+
+      if (hasWeapon) {
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 16px "Courier New"';
+        ctx.fillText(wb.label, wb.x + wb.w / 2, wb.y + wb.h / 2 - 4);
+
+        // Weapon name
+        ctx.font = '9px "Courier New"';
+        ctx.globalAlpha = 0.7;
+        ctx.fillText(game.player.weapons[i].name.substring(0, 5), wb.x + wb.w / 2, wb.y + wb.h / 2 + 12);
+      }
+    }
+  }
+
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// ============= DRAW VIRTUAL KEYBOARD =============
+function drawVirtualKeyboard() {
+  if (!isTouchDevice || game.state !== 'nameEntry') return;
+
+  ctx.save();
+  for (const vk of vkb.keys) {
+    const isAction = vk.char === 'ENTER' || vk.char === 'BACKSPACE' || vk.char === ' ';
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = vk.char === 'ENTER' ? '#2a6' : vk.char === 'BACKSPACE' ? '#a44' : '#333';
+    ctx.fillRect(vk.x, vk.y, vk.w, vk.h);
+    ctx.strokeStyle = '#666';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(vk.x, vk.y, vk.w, vk.h);
+
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#fff';
+    ctx.font = isAction ? 'bold 12px "Courier New"' : 'bold 16px "Courier New"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(vk.label, vk.x + vk.w / 2, vk.y + vk.h / 2);
+  }
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
 
 // ============= WEAPON DEFINITIONS =============
 const WEAPONS = [
@@ -837,6 +1325,9 @@ class Player {
     this.x = clamp(this.x, this.size, canvas.width - this.size);
     this.y = clamp(this.y, this.size, canvas.height - this.size);
 
+    // Auto-aim on touch devices (updates mouse.x/y to nearest zombie)
+    if (isTouchDevice && game) autoAimAtNearest(this, game.zombies);
+
     // Aim at mouse
     this.angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
 
@@ -1374,7 +1865,7 @@ class Game {
 
     ctx.font = '16px "Courier New"';
     ctx.fillStyle = '#888';
-    ctx.fillText('Press P to resume | ESC for main menu', cx, cy + 140);
+    ctx.fillText(isTouchDevice ? 'Tap buttons above' : 'Press P to resume | ESC for main menu', cx, cy + 140);
     ctx.textAlign = 'left';
 
     // Store button positions for click handling
@@ -1556,6 +2047,12 @@ class Game {
       this.drawBossBar(boss);
     }
 
+    // Touch controls overlay (drawn on top of game, under pause)
+    drawTouchControls();
+
+    // Virtual keyboard for name entry on touch
+    drawVirtualKeyboard();
+
     // Pause overlay
     if (this.state === 'paused') {
       this.drawPauseMenu();
@@ -1628,7 +2125,14 @@ class Game {
     ctx.stroke();
 
     // Control entries
-    const controls = [
+    const controls = isTouchDevice ? [
+      { key: 'Joystick',      desc: 'Move' },
+      { key: 'Auto-Aim',      desc: 'Nearest zombie' },
+      { key: 'FIRE btn',      desc: 'Shoot' },
+      { key: 'MELEE btn',     desc: 'Melee attack' },
+      { key: '1-4 btns',      desc: 'Switch weapon' },
+      { key: 'II btn',        desc: 'Pause' }
+    ] : [
       { key: 'WASD',          desc: 'Move' },
       { key: 'Mouse',         desc: 'Aim' },
       { key: 'Click',         desc: 'Shoot' },
@@ -1674,7 +2178,7 @@ class Game {
     const alpha = Math.sin(this.menuPulse * 2) * 0.3 + 0.7;
     ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
     ctx.font = 'bold 28px "Courier New"';
-    ctx.fillText('[ CLICK TO START ]', cx, panelY + panelH + 75);
+    ctx.fillText(isTouchDevice ? '[ TAP TO START ]' : '[ CLICK TO START ]', cx, panelY + panelH + 75);
 
     // High score
     if (this.highScore > 0) {
@@ -1867,7 +2371,9 @@ class Game {
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.font = '12px "Courier New"';
-    ctx.fillText('WASD Move | LMB Shoot | RMB/Space Melee | 1234 Switch', canvas.width/2, canvas.height - 15);
+    if (!isTouchDevice) {
+      ctx.fillText('WASD Move | LMB Shoot | RMB/Space Melee | 1234 Switch', canvas.width/2, canvas.height - 15);
+    }
   }
 
   drawWaveIntro() {
@@ -1931,7 +2437,7 @@ class Game {
     const alpha = Math.sin(Date.now() / 500) * 0.3 + 0.7;
     ctx.fillStyle = `rgba(255,255,255,${alpha})`;
     ctx.font = 'bold 22px "Courier New"';
-    ctx.fillText('[ CLICK TO PLAY AGAIN ]', cx, cy + 160);
+    ctx.fillText(isTouchDevice ? '[ TAP TO PLAY AGAIN ]' : '[ CLICK TO PLAY AGAIN ]', cx, cy + 160);
   }
 
   drawNameEntry() {
@@ -2000,11 +2506,13 @@ class Game {
     // Instructions
     ctx.fillStyle = '#aaa';
     ctx.font = '16px "Courier New"';
-    ctx.fillText('Type your name and press ENTER to confirm', cx, fieldY + fieldH + 50);
+    ctx.fillText(isTouchDevice ? 'Use keyboard below to enter name' : 'Type your name and press ENTER to confirm', cx, fieldY + fieldH + 50);
 
     ctx.fillStyle = '#666';
     ctx.font = '14px "Courier New"';
     ctx.fillText('(Default: PLAYER)', cx, fieldY + fieldH + 72);
+
+    // On touch devices, also show the virtual keyboard in drawVirtualKeyboard()
   }
 
   drawLeaderboardScreen() {
@@ -2042,7 +2550,7 @@ class Game {
     ctx.fillStyle = `rgba(255,255,255,${alpha})`;
     ctx.font = 'bold 22px "Courier New"';
     ctx.textAlign = 'center';
-    ctx.fillText('[ CLICK TO PLAY AGAIN ]', cx, cy + 220);
+    ctx.fillText(isTouchDevice ? '[ TAP TO PLAY AGAIN ]' : '[ CLICK TO PLAY AGAIN ]', cx, cy + 220);
   }
 
   drawLeaderboardTable(board, cx, startY, maxEntries, highlightRank) {

@@ -2098,7 +2098,436 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
+// ---- TOUCH CONTROLS ----
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+// Touch button state tracking
+const touchButtons = {};
+const activeTouches = {};
+
+// Touch button definitions (populated in drawTouchControls based on screen size)
+let touchButtonDefs = [];
+
+function buildTouchButtonDefs() {
+    // Bottom control bar layout
+    const btnH = 52;
+    const btnGap = 6;
+    const barY = H - btnH - 14;
+    const smallBtnW = 62;
+    const medBtnW = 72;
+    const fireBtnW = 80;
+    const fireBtnH = 52;
+
+    // Left: Move buttons
+    const moveLeftX = 14;
+    const moveRightX = moveLeftX + smallBtnW + btnGap;
+
+    // Center-left: Angle buttons
+    const angleLeftX = moveRightX + smallBtnW + btnGap + 10;
+    const angleRightX = angleLeftX + medBtnW + btnGap;
+
+    // Center-right: Power buttons
+    const pwrDownX = angleRightX + medBtnW + btnGap + 10;
+    const pwrUpX = pwrDownX + medBtnW + btnGap;
+
+    // Right: Fire button
+    const fireX = W - fireBtnW - 14;
+
+    // Ammo buttons row above control bar
+    const ammoBtnW = 56;
+    const ammoBtnH = 36;
+    const ammoY = barY - ammoBtnH - 8;
+    const ammoStartX = 14;
+
+    // Pause button top-right
+    const pauseBtnW = 52;
+    const pauseBtnH = 40;
+    const pauseX = W - pauseBtnW - 14;
+    const pauseY = 10;
+
+    touchButtonDefs = [
+        // Movement
+        { id: 'moveLeft',   x: moveLeftX,   y: barY, w: smallBtnW, h: btnH, label: '< Move', group: 'play' },
+        { id: 'moveRight',  x: moveRightX,  y: barY, w: smallBtnW, h: btnH, label: 'Move >', group: 'play' },
+        // Angle
+        { id: 'angleLeft',  x: angleLeftX,  y: barY, w: medBtnW,   h: btnH, label: '< Angle', group: 'play' },
+        { id: 'angleRight', x: angleRightX, y: barY, w: medBtnW,   h: btnH, label: 'Angle >', group: 'play' },
+        // Power
+        { id: 'pwrDown',    x: pwrDownX,    y: barY, w: medBtnW,   h: btnH, label: 'Pwr -',  group: 'play' },
+        { id: 'pwrUp',      x: pwrUpX,      y: barY, w: medBtnW,   h: btnH, label: 'Pwr +',  group: 'play' },
+        // Fire
+        { id: 'fire',       x: fireX,       y: barY, w: fireBtnW,  h: fireBtnH, label: 'FIRE', group: 'play', style: 'fire' },
+        // Pause
+        { id: 'pause',      x: pauseX,      y: pauseY, w: pauseBtnW, h: pauseBtnH, label: '| |', group: 'always', style: 'pause' },
+        // Ammo 1-5
+        { id: 'ammo1', x: ammoStartX,                            y: ammoY, w: ammoBtnW, h: ammoBtnH, label: '1', group: 'play', style: 'ammo', ammoIdx: 0 },
+        { id: 'ammo2', x: ammoStartX + (ammoBtnW + btnGap),      y: ammoY, w: ammoBtnW, h: ammoBtnH, label: '2', group: 'play', style: 'ammo', ammoIdx: 1 },
+        { id: 'ammo3', x: ammoStartX + (ammoBtnW + btnGap) * 2,  y: ammoY, w: ammoBtnW, h: ammoBtnH, label: '3', group: 'play', style: 'ammo', ammoIdx: 2 },
+        { id: 'ammo4', x: ammoStartX + (ammoBtnW + btnGap) * 3,  y: ammoY, w: ammoBtnW, h: ammoBtnH, label: '4', group: 'play', style: 'ammo', ammoIdx: 3 },
+        { id: 'ammo5', x: ammoStartX + (ammoBtnW + btnGap) * 4,  y: ammoY, w: ammoBtnW, h: ammoBtnH, label: '5', group: 'play', style: 'ammo', ammoIdx: 4 },
+    ];
+}
+
+function getTouchPos(touch) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+        x: (touch.clientX - rect.left) * scaleX,
+        y: (touch.clientY - rect.top) * scaleY
+    };
+}
+
+function hitTestButton(tx, ty, btn) {
+    return tx >= btn.x && tx <= btn.x + btn.w && ty >= btn.y && ty <= btn.y + btn.h;
+}
+
+function isPlayerTurn() {
+    if (gameState !== 'playing') return false;
+    if (!turnActive || hasFired) return false;
+    if (gameMode === '1p' && currentPlayer === 1) return false;
+    return true;
+}
+
+function applyTouchButton(id, pressed) {
+    if (id === 'moveLeft')  { keys['a'] = pressed; keys['A'] = pressed; }
+    if (id === 'moveRight') { keys['d'] = pressed; keys['D'] = pressed; }
+    if (id === 'angleLeft') { keys['ArrowLeft'] = pressed; }
+    if (id === 'angleRight'){ keys['ArrowRight'] = pressed; }
+    if (id === 'pwrUp')     { keys['ArrowUp'] = pressed; }
+    if (id === 'pwrDown')   { keys['ArrowDown'] = pressed; }
+}
+
+if (isTouchDevice) {
+    // Prevent default touch behaviors on canvas (no scrolling, zooming)
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
+    canvas.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
+    canvas.addEventListener('touchend', (e) => { e.preventDefault(); }, { passive: false });
+    canvas.addEventListener('touchcancel', (e) => { e.preventDefault(); }, { passive: false });
+
+    canvas.addEventListener('touchstart', (e) => {
+        ensureAudio();
+        for (const touch of e.changedTouches) {
+            const pos = getTouchPos(touch);
+            activeTouches[touch.identifier] = pos;
+
+            // --- MENU TAP HANDLING ---
+            if (gameState === 'menu') {
+                handleMenuTouch(pos.x, pos.y);
+                continue;
+            }
+
+            // --- NAME ENTRY TAP HANDLING ---
+            if (gameState === 'nameEntry') {
+                handleNameEntryTouch(pos.x, pos.y);
+                continue;
+            }
+
+            // --- ROUND END / MATCH END TAP HANDLING ---
+            if (gameState === 'roundEnd' || gameState === 'matchEnd') {
+                // Simulate Space press to advance
+                const fakeEvent = { key: ' ', preventDefault: () => {} };
+                // Directly call the handler logic
+                if (gameState === 'roundEnd') {
+                    currentRound++;
+                    if (currentRound < BEST_OF && roundScores[0] < ROUNDS_TO_WIN && roundScores[1] < ROUNDS_TO_WIN) {
+                        initRound();
+                        gameState = 'playing';
+                    } else {
+                        nameEntryWinnerIndex = roundScores[0] >= ROUNDS_TO_WIN ? 0 : 1;
+                        if (isTopTenWorthy(roundScores[nameEntryWinnerIndex])) {
+                            nameEntryText = '';
+                            gameState = 'nameEntry';
+                            matchEndTimer = 0;
+                        } else {
+                            gameState = 'matchEnd';
+                            matchEndTimer = 0;
+                        }
+                    }
+                } else {
+                    gameState = 'menu';
+                }
+                continue;
+            }
+
+            // --- PAUSE OVERLAY TAP HANDLING ---
+            if (paused) {
+                handlePauseTouch(pos.x, pos.y);
+                continue;
+            }
+
+            // --- GAMEPLAY TOUCH BUTTONS ---
+            if (gameState === 'playing') {
+                // Check pause button (always visible)
+                for (const btn of touchButtonDefs) {
+                    if (btn.id === 'pause' && hitTestButton(pos.x, pos.y, btn)) {
+                        if (!paused) {
+                            paused = true;
+                            stateBeforePause = gameState;
+                        }
+                        continue;
+                    }
+                }
+
+                if (isPlayerTurn()) {
+                    for (const btn of touchButtonDefs) {
+                        if (btn.group !== 'play') continue;
+                        if (hitTestButton(pos.x, pos.y, btn)) {
+                            touchButtons[btn.id] = true;
+
+                            // Continuous buttons (movement, angle, power)
+                            applyTouchButton(btn.id, true);
+
+                            // Fire button: one-shot
+                            if (btn.id === 'fire') {
+                                const tank = tanks[currentPlayer];
+                                fireProjectile(tank);
+                                cameraFollowing = true;
+                                followTarget = projectiles[projectiles.length - 1];
+                            }
+
+                            // Ammo select: one-shot
+                            if (btn.style === 'ammo') {
+                                const tank = tanks[currentPlayer];
+                                const idx = btn.ammoIdx;
+                                if (idx < AMMO_TYPES.length && tank.ammo[idx] > 0) {
+                                    tank.selectedAmmo = idx;
+                                    playSound('select');
+                                }
+                            }
+
+                            // Track which button this touch is on
+                            activeTouches[touch.identifier] = { ...pos, btnId: btn.id };
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    canvas.addEventListener('touchmove', (e) => {
+        // For continuous buttons, update if finger slides off
+        for (const touch of e.changedTouches) {
+            const pos = getTouchPos(touch);
+            const info = activeTouches[touch.identifier];
+            if (info && info.btnId) {
+                const btn = touchButtonDefs.find(b => b.id === info.btnId);
+                if (btn && !hitTestButton(pos.x, pos.y, btn)) {
+                    // Finger slid off button - release it
+                    touchButtons[info.btnId] = false;
+                    applyTouchButton(info.btnId, false);
+                    info.btnId = null;
+                }
+            }
+        }
+    });
+
+    canvas.addEventListener('touchend', (e) => {
+        for (const touch of e.changedTouches) {
+            const info = activeTouches[touch.identifier];
+            if (info && info.btnId) {
+                touchButtons[info.btnId] = false;
+                applyTouchButton(info.btnId, false);
+            }
+            delete activeTouches[touch.identifier];
+        }
+    });
+
+    canvas.addEventListener('touchcancel', (e) => {
+        for (const touch of e.changedTouches) {
+            const info = activeTouches[touch.identifier];
+            if (info && info.btnId) {
+                touchButtons[info.btnId] = false;
+                applyTouchButton(info.btnId, false);
+            }
+            delete activeTouches[touch.identifier];
+        }
+    });
+}
+
+function handleMenuTouch(tx, ty) {
+    // Detect taps on menu items
+    const menuY = H * 0.4;
+    const spacing = 60;
+
+    // Mode buttons
+    const modes = ['1 Player vs AI', '2 Players Local'];
+    for (let i = 0; i < 2; i++) {
+        const mx = W / 2 + (i - 0.5) * 200;
+        if (tx > mx - 100 && tx < mx + 100 && ty > menuY + 10 && ty < menuY + 45) {
+            menuSelection = 'mode';
+            selectedMode = i;
+            playSound('select');
+            return;
+        }
+    }
+
+    // Difficulty buttons (only if 1P mode selected)
+    if (selectedMode === 0) {
+        const diffs = ['Easy', 'Medium', 'Hard'];
+        for (let i = 0; i < 3; i++) {
+            const dx = W / 2 + (i - 1) * 140;
+            if (tx > dx - 60 && tx < dx + 60 && ty > menuY + spacing + 10 && ty < menuY + spacing + 45) {
+                menuSelection = 'difficulty';
+                selectedDifficulty = i;
+                playSound('select');
+                return;
+            }
+        }
+    }
+
+    // Start button
+    const startY = selectedMode === 0 ? menuY + spacing * 2 + 20 : menuY + spacing + 20;
+    if (tx > W / 2 - 150 && tx < W / 2 + 150 && ty > startY - 20 && ty < startY + 15) {
+        gameMode = selectedMode === 0 ? '1p' : '2p';
+        aiDifficulty = ['easy', 'medium', 'hard'][selectedDifficulty];
+        roundScores = [0, 0];
+        currentRound = 0;
+        initRound();
+        gameState = 'playing';
+        playSound('fire');
+        return;
+    }
+}
+
+function handlePauseTouch(tx, ty) {
+    const btnW = 260;
+    const btnH = 50;
+    const btnX = W / 2 - btnW / 2;
+    const resumeBtnY = H / 2 - 10;
+    const menuBtnY = H / 2 + 60;
+
+    // Resume button
+    if (tx >= btnX && tx <= btnX + btnW && ty >= resumeBtnY && ty <= resumeBtnY + btnH) {
+        paused = false;
+        gameState = stateBeforePause;
+        stateBeforePause = null;
+    }
+    // Main Menu button
+    if (tx >= btnX && tx <= btnX + btnW && ty >= menuBtnY && ty <= menuBtnY + btnH) {
+        paused = false;
+        stateBeforePause = null;
+        window.location.href = '../../index.html';
+    }
+}
+
+function handleNameEntryTouch(tx, ty) {
+    // For name entry on touch, show a prompt-based input since there is no
+    // on-screen keyboard we can control. We use a native prompt fallback.
+    const result = prompt('Enter your name (max 12 chars):', nameEntryText || 'PLAYER');
+    if (result !== null) {
+        nameEntryText = result.replace(/[^A-Za-z0-9 _\-]/g, '').slice(0, 12).toUpperCase();
+        const finalName = nameEntryText.trim() || 'PLAYER';
+        addToLeaderboard(finalName, roundScores[nameEntryWinnerIndex]);
+        gameState = 'matchEnd';
+    }
+}
+
+function drawTouchControls() {
+    if (!isTouchDevice) return;
+
+    // Rebuild button positions each frame (handles resize)
+    buildTouchButtonDefs();
+
+    const isPlaying = gameState === 'playing';
+    const showPlayBtns = isPlaying && isPlayerTurn() && !paused;
+
+    for (const btn of touchButtonDefs) {
+        // Determine visibility
+        if (btn.group === 'play' && !showPlayBtns) continue;
+        if (btn.group === 'always' && (gameState === 'menu' || paused)) continue;
+
+        const pressed = touchButtons[btn.id] || false;
+        const alpha = pressed ? 0.55 : 0.35;
+
+        // Draw rounded rect button
+        ctx.save();
+        const r = 8;
+
+        // Button background
+        if (btn.style === 'fire') {
+            ctx.fillStyle = `rgba(220, 60, 20, ${alpha + 0.15})`;
+        } else if (btn.style === 'pause') {
+            ctx.fillStyle = `rgba(100, 100, 100, ${alpha})`;
+        } else if (btn.style === 'ammo') {
+            const tank = tanks[currentPlayer];
+            const ammoType = AMMO_TYPES[btn.ammoIdx];
+            const isSelected = tank && tank.selectedAmmo === btn.ammoIdx;
+            const isAvailable = tank && tank.ammo[btn.ammoIdx] > 0;
+            if (isSelected) {
+                ctx.fillStyle = `rgba(255, 200, 50, ${alpha + 0.2})`;
+            } else if (!isAvailable) {
+                ctx.fillStyle = `rgba(60, 60, 60, ${alpha - 0.1})`;
+            } else {
+                ctx.fillStyle = `rgba(80, 80, 80, ${alpha})`;
+            }
+        } else {
+            ctx.fillStyle = `rgba(50, 50, 50, ${alpha})`;
+        }
+
+        // Draw rounded rect
+        ctx.beginPath();
+        ctx.moveTo(btn.x + r, btn.y);
+        ctx.lineTo(btn.x + btn.w - r, btn.y);
+        ctx.quadraticCurveTo(btn.x + btn.w, btn.y, btn.x + btn.w, btn.y + r);
+        ctx.lineTo(btn.x + btn.w, btn.y + btn.h - r);
+        ctx.quadraticCurveTo(btn.x + btn.w, btn.y + btn.h, btn.x + btn.w - r, btn.y + btn.h);
+        ctx.lineTo(btn.x + r, btn.y + btn.h);
+        ctx.quadraticCurveTo(btn.x, btn.y + btn.h, btn.x, btn.y + btn.h - r);
+        ctx.lineTo(btn.x, btn.y + r);
+        ctx.quadraticCurveTo(btn.x, btn.y, btn.x + r, btn.y);
+        ctx.closePath();
+        ctx.fill();
+
+        // Button border
+        if (btn.style === 'fire') {
+            ctx.strokeStyle = `rgba(255, 100, 50, ${alpha + 0.3})`;
+        } else if (btn.style === 'ammo') {
+            const tank = tanks[currentPlayer];
+            const isSelected = tank && tank.selectedAmmo === btn.ammoIdx;
+            ctx.strokeStyle = isSelected ? `rgba(255, 220, 80, 0.8)` : `rgba(150, 150, 150, ${alpha})`;
+        } else {
+            ctx.strokeStyle = `rgba(200, 200, 200, ${alpha})`;
+        }
+        ctx.lineWidth = pressed ? 2 : 1;
+        ctx.stroke();
+
+        // Button label
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        if (btn.style === 'fire') {
+            ctx.fillStyle = `rgba(255, 255, 255, ${alpha + 0.45})`;
+            ctx.font = 'bold 16px "Segoe UI", Arial';
+            ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + btn.h / 2);
+        } else if (btn.style === 'ammo') {
+            const tank = tanks[currentPlayer];
+            const ammoType = AMMO_TYPES[btn.ammoIdx];
+            const isAvailable = tank && tank.ammo[btn.ammoIdx] > 0;
+            ctx.fillStyle = isAvailable ? `rgba(255, 255, 255, 0.85)` : `rgba(120, 120, 120, 0.6)`;
+            ctx.font = 'bold 14px "Segoe UI", Arial';
+            ctx.fillText(ammoType.name.substring(0, 4), btn.x + btn.w / 2, btn.y + btn.h / 2 - 4);
+            ctx.font = '10px "Segoe UI", Arial';
+            const countLabel = ammoType.count === Infinity ? 'Inf' : (tank ? tank.ammo[btn.ammoIdx] : 0);
+            ctx.fillText(countLabel, btn.x + btn.w / 2, btn.y + btn.h / 2 + 10);
+        } else if (btn.style === 'pause') {
+            ctx.fillStyle = `rgba(255, 255, 255, 0.8)`;
+            ctx.font = 'bold 18px "Segoe UI", Arial';
+            ctx.fillText('||', btn.x + btn.w / 2, btn.y + btn.h / 2);
+        } else {
+            ctx.fillStyle = `rgba(255, 255, 255, 0.8)`;
+            ctx.font = '13px "Segoe UI", Arial';
+            ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + btn.h / 2);
+        }
+
+        ctx.textBaseline = 'alphabetic';
+        ctx.restore();
+    }
+}
+
 // ---- START ----
+if (isTouchDevice) buildTouchButtonDefs();
 gameLoop();
 </script>
 </body>

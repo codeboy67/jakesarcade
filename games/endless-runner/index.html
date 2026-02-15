@@ -199,6 +199,19 @@ const SLIDE_DURATION = 40;
 const PLAYER_NORMAL_H = 50;
 const PLAYER_SLIDE_H = 25;
 
+// ---- TOUCH DEVICE DETECTION ----
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+let touchHintAlpha = isTouchDevice ? 1.0 : 0; // Fade-out alpha for touch zone hints
+let touchHintTimer = 0; // Frames since gameplay started (for auto-fade)
+const TOUCH_HINT_DURATION = 180; // Show hints for ~3 seconds at 60fps
+const TOUCH_HINT_FADE = 60; // Fade out over ~1 second
+
+// Pause button geometry (top-right, but left of the HUD score panel)
+const PAUSE_BTN_RADIUS = 22;
+function getPauseBtnPos() {
+    return { x: canvas.width - 220, y: 38 };
+}
+
 // ---- INPUT ----
 const keys = {};
 let jumpPressed = false;
@@ -206,6 +219,53 @@ let slidePressed = false;
 let lastJumpPress = 0;
 let touchStartY = 0;
 let touchStartX = 0;
+
+// ---- NAME ENTRY TOUCH KEYBOARD ----
+// On-screen keyboard layout for touch name entry
+const TOUCH_KB_ROWS = [
+    'QWERTYUIOP',
+    'ASDFGHJKL',
+    'ZXCVBNM'
+];
+const TOUCH_KB_SPECIAL = ['DEL', 'SPACE', 'OK']; // bottom row special keys
+
+// Returns {keys: [{char, x, y, w, h}, ...], specialKeys: [{label, x, y, w, h}, ...]}
+function getTouchKeyboardLayout() {
+    const W = canvas.width;
+    const H = canvas.height;
+    const kbW = Math.min(W - 40, 500);
+    const keySize = Math.floor(kbW / 11);
+    const keyGap = 3;
+    const kbStartY = H / 2 + 60;
+    const kbLeft = W / 2 - kbW / 2;
+
+    const allKeys = [];
+    for (let r = 0; r < TOUCH_KB_ROWS.length; r++) {
+        const row = TOUCH_KB_ROWS[r];
+        const rowW = row.length * (keySize + keyGap) - keyGap;
+        const rowLeft = W / 2 - rowW / 2;
+        for (let c = 0; c < row.length; c++) {
+            allKeys.push({
+                char: row[c],
+                x: rowLeft + c * (keySize + keyGap),
+                y: kbStartY + r * (keySize + keyGap + 4),
+                w: keySize,
+                h: keySize
+            });
+        }
+    }
+
+    // Special keys row
+    const specY = kbStartY + TOUCH_KB_ROWS.length * (keySize + keyGap + 4);
+    const specW = Math.floor(kbW / 3) - keyGap;
+    const specialKeys = [
+        { label: 'DEL',   x: kbLeft,                    y: specY, w: specW, h: keySize },
+        { label: 'SPACE', x: kbLeft + specW + keyGap,    y: specY, w: specW, h: keySize },
+        { label: 'OK',    x: kbLeft + 2 * (specW + keyGap), y: specY, w: specW, h: keySize }
+    ];
+
+    return { keys: allKeys, specialKeys, keySize };
+}
 
 window.addEventListener('keydown', e => {
     // ---- NAME ENTRY mode: capture text input, block all game controls ----
@@ -266,14 +326,49 @@ canvas.addEventListener('touchstart', e => {
     const t = e.touches[0];
     touchStartY = t.clientY;
     touchStartX = t.clientX;
-    if (state === STATE.MENU) { startGame(); return; }
-    if (state === STATE.NAME_ENTRY) return; // Ignore touch during name entry
-    if (state === STATE.GAMEOVER) { goToMenu(); return; }
-    // Tap upper half = jump, lower half = slide
-    if (t.clientY < canvas.height * 0.5) {
-        jumpPressed = true;
-    } else {
-        slidePressed = true;
+
+    // --- MENU: delegate to handleClick so play button and leaderboard work ---
+    if (state === STATE.MENU) {
+        handleClick(t.clientX, t.clientY);
+        return;
+    }
+
+    // --- NAME ENTRY: handle on-screen keyboard taps ---
+    if (state === STATE.NAME_ENTRY) {
+        handleNameEntryTouch(t.clientX, t.clientY);
+        return;
+    }
+
+    // --- GAMEOVER: delegate to handleClick for proper button detection ---
+    if (state === STATE.GAMEOVER) {
+        handleClick(t.clientX, t.clientY);
+        return;
+    }
+
+    // --- PAUSED: delegate to handleClick for Resume / Main Menu buttons ---
+    if (state === STATE.PAUSED) {
+        handleClick(t.clientX, t.clientY);
+        return;
+    }
+
+    // --- PLAYING: check pause button first, then jump/slide zones ---
+    if (state === STATE.PLAYING) {
+        // Check pause button
+        const pb = getPauseBtnPos();
+        const dx = t.clientX - pb.x;
+        const dy = t.clientY - pb.y;
+        if (dx * dx + dy * dy <= (PAUSE_BTN_RADIUS + 8) * (PAUSE_BTN_RADIUS + 8)) {
+            stateBeforePause = STATE.PLAYING;
+            state = STATE.PAUSED;
+            return;
+        }
+
+        // Tap upper half = jump, lower half = slide
+        if (t.clientY < canvas.height * 0.5) {
+            jumpPressed = true;
+        } else {
+            slidePressed = true;
+        }
     }
 }, { passive: false });
 
@@ -284,6 +379,37 @@ canvas.addEventListener('touchend', e => {
     keys['ArrowDown'] = false;
 }, { passive: false });
 
+// Handle touch taps on the on-screen keyboard during NAME_ENTRY
+function handleNameEntryTouch(mx, my) {
+    const kb = getTouchKeyboardLayout();
+
+    // Check letter keys
+    for (const k of kb.keys) {
+        if (mx >= k.x && mx <= k.x + k.w && my >= k.y && my <= k.y + k.h) {
+            if (nameEntryText.length < 12) {
+                nameEntryText += k.char;
+            }
+            return;
+        }
+    }
+
+    // Check special keys
+    for (const sk of kb.specialKeys) {
+        if (mx >= sk.x && mx <= sk.x + sk.w && my >= sk.y && my <= sk.y + sk.h) {
+            if (sk.label === 'DEL') {
+                nameEntryText = nameEntryText.slice(0, -1);
+            } else if (sk.label === 'SPACE') {
+                if (nameEntryText.length < 12) nameEntryText += ' ';
+            } else if (sk.label === 'OK') {
+                const finalName = nameEntryText.trim() || 'PLAYER';
+                addToLeaderboard(finalName, score);
+                state = STATE.GAMEOVER;
+            }
+            return;
+        }
+    }
+}
+
 // Mouse for menus
 canvas.addEventListener('click', e => {
     ensureAudio();
@@ -292,17 +418,19 @@ canvas.addEventListener('click', e => {
 
 function handleClick(mx, my) {
     if (state === STATE.MENU) {
-        // Play button
+        // Play button -- use same position as drawMenu
+        const titleY = Math.min(canvas.height * 0.18, 120);
         const bx = canvas.width / 2;
-        const by = canvas.height / 2 + 40;
-        if (mx > bx - 100 && mx < bx + 100 && my > by - 30 && my < by + 30) {
+        const by = titleY + 100;
+        if (mx > bx - 100 && mx < bx + 100 && my > by - 28 && my < by + 28) {
             startGame();
         }
     } else if (state === STATE.NAME_ENTRY) {
-        // Do nothing, wait for keyboard input
+        // Keyboard input only (or touch keyboard)
+        if (isTouchDevice) handleNameEntryTouch(mx, my);
         return;
     } else if (state === STATE.GAMEOVER) {
-        // Play again button — positioned after leaderboard
+        // Play again button -- positioned after leaderboard
         const bx = canvas.width / 2;
         const by = gameOverPlayAgainY || (canvas.height / 2 + 100);
         if (mx > bx - 100 && mx < bx + 100 && my > by - 25 && my < by + 25) {

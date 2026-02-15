@@ -118,6 +118,17 @@ let levelHeight = 0;
 let bossRef = null;
 let keys = {};
 let lastTime = 0;
+
+// Touch controls
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+let touchState = {
+    left: false,
+    right: false,
+    jump: false,
+    dash: false,
+    pause: false
+};
+let activeTouches = {}; // track which button each touch ID is pressing
 let frameCount = 0;
 let menuBounce = 0;
 let levelCompleteTimer = 0;
@@ -193,6 +204,197 @@ function isLeft() { return keys['ArrowLeft'] || keys['KeyA']; }
 function isRight() { return keys['ArrowRight'] || keys['KeyD']; }
 function isJump() { return keys['Space'] || keys['ArrowUp'] || keys['KeyW']; }
 function isDash() { return keys['ShiftLeft'] || keys['ShiftRight']; }
+
+// ============================================================
+// TOUCH CONTROLS
+// ============================================================
+function getTouchButtonBounds() {
+    const cw = canvas.width;
+    const ch = canvas.height;
+    return {
+        left:  { x: 75,       y: ch - 85,  r: 50 },
+        right: { x: 205,      y: ch - 85,  r: 50 },
+        jump:  { x: cw - 95,  y: ch - 95,  r: 60 },
+        dash:  { x: cw - 95,  y: ch - 195, r: 35 },
+        pause: { x: cw - 40,  y: 40,       r: 25 }
+    };
+}
+
+function pointInCircle(px, py, cx, cy, r) {
+    const dx = px - cx;
+    const dy = py - cy;
+    return dx * dx + dy * dy <= r * r;
+}
+
+function identifyTouchButton(tx, ty) {
+    // Only check gameplay buttons when actually playing
+    if (gameState === 'playing') {
+        const bounds = getTouchButtonBounds();
+        // Use generous hit areas (1.3x radius) for easier tapping
+        if (pointInCircle(tx, ty, bounds.left.x, bounds.left.y, bounds.left.r * 1.3)) return 'left';
+        if (pointInCircle(tx, ty, bounds.right.x, bounds.right.y, bounds.right.r * 1.3)) return 'right';
+        if (pointInCircle(tx, ty, bounds.jump.x, bounds.jump.y, bounds.jump.r * 1.3)) return 'jump';
+        if (pointInCircle(tx, ty, bounds.dash.x, bounds.dash.y, bounds.dash.r * 1.3)) return 'dash';
+        if (pointInCircle(tx, ty, bounds.pause.x, bounds.pause.y, bounds.pause.r * 1.3)) return 'pause';
+    }
+    return null;
+}
+
+function updateTouchKeys() {
+    keys['ArrowLeft'] = touchState.left || keys['ArrowLeft'];
+    keys['ArrowRight'] = touchState.right || keys['ArrowRight'];
+    keys['Space'] = touchState.jump || keys['Space'];
+    keys['ShiftLeft'] = touchState.dash || keys['ShiftLeft'];
+}
+
+function syncTouchState() {
+    // Reset all touch states
+    touchState.left = false;
+    touchState.right = false;
+    touchState.jump = false;
+    touchState.dash = false;
+    touchState.pause = false;
+    // Rebuild from active touches
+    for (const id in activeTouches) {
+        const btn = activeTouches[id];
+        if (btn) touchState[btn] = true;
+    }
+    // Map touch state to keys
+    keys['ArrowLeft'] = touchState.left ? true : keys['ArrowLeft'];
+    keys['ArrowRight'] = touchState.right ? true : keys['ArrowRight'];
+    keys['Space'] = touchState.jump ? true : keys['Space'];
+    keys['ShiftLeft'] = touchState.dash ? true : keys['ShiftLeft'];
+}
+
+if (isTouchDevice) {
+    // Prevent default on canvas to avoid scrolling/zooming
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); }, { passive: false });
+    canvas.addEventListener('touchmove', e => { e.preventDefault(); }, { passive: false });
+    canvas.addEventListener('touchend', e => { e.preventDefault(); }, { passive: false });
+    canvas.addEventListener('touchcancel', e => { e.preventDefault(); }, { passive: false });
+
+    canvas.addEventListener('touchstart', e => {
+        ensureAudio();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            const tx = touch.clientX;
+            const ty = touch.clientY;
+
+            if (gameState === 'playing') {
+                const btn = identifyTouchButton(tx, ty);
+                if (btn) {
+                    if (btn === 'pause') {
+                        // Toggle pause
+                        stateBeforePause = gameState;
+                        gameState = 'paused';
+                    } else {
+                        activeTouches[touch.identifier] = btn;
+                        syncTouchState();
+                    }
+                }
+            } else {
+                // For non-playing states, simulate a click for menu interaction
+                mouseX = tx;
+                mouseY = ty;
+                handleClick({ clientX: tx, clientY: ty });
+            }
+        }
+    });
+
+    canvas.addEventListener('touchmove', e => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            const tx = touch.clientX;
+            const ty = touch.clientY;
+
+            if (gameState === 'playing') {
+                // Re-evaluate which button this touch is over
+                const btn = identifyTouchButton(tx, ty);
+                activeTouches[touch.identifier] = btn;
+                syncTouchState();
+            }
+        }
+    });
+
+    canvas.addEventListener('touchend', e => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            const id = touch.identifier;
+            const prevBtn = activeTouches[id];
+            delete activeTouches[id];
+            syncTouchState();
+            // When a touch button is released, also clear its corresponding key
+            // (only if no other touch is still pressing it)
+            if (prevBtn === 'left' && !touchState.left) keys['ArrowLeft'] = false;
+            if (prevBtn === 'right' && !touchState.right) keys['ArrowRight'] = false;
+            if (prevBtn === 'jump' && !touchState.jump) keys['Space'] = false;
+            if (prevBtn === 'dash' && !touchState.dash) keys['ShiftLeft'] = false;
+        }
+    });
+
+    canvas.addEventListener('touchcancel', e => {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            const touch = e.changedTouches[i];
+            const prevBtn = activeTouches[touch.identifier];
+            delete activeTouches[touch.identifier];
+            syncTouchState();
+            if (prevBtn === 'left' && !touchState.left) keys['ArrowLeft'] = false;
+            if (prevBtn === 'right' && !touchState.right) keys['ArrowRight'] = false;
+            if (prevBtn === 'jump' && !touchState.jump) keys['Space'] = false;
+            if (prevBtn === 'dash' && !touchState.dash) keys['ShiftLeft'] = false;
+        }
+    });
+}
+
+function drawTouchControls() {
+    if (!isTouchDevice) return;
+    if (gameState !== 'playing') return;
+
+    const bounds = getTouchButtonBounds();
+
+    // Helper to draw a circular button
+    function drawBtn(cx, cy, r, label, pressed, fontSize) {
+        ctx.save();
+        ctx.globalAlpha = pressed ? 0.55 : 0.35;
+
+        // Button circle fill
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = pressed ? '#ffffff' : '#cccccc';
+        ctx.fill();
+
+        // Button circle border
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ffffff';
+        ctx.globalAlpha = pressed ? 0.7 : 0.45;
+        ctx.stroke();
+
+        // Label text
+        ctx.globalAlpha = pressed ? 0.9 : 0.6;
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold ' + (fontSize || 18) + 'px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, cx, cy);
+
+        ctx.restore();
+    }
+
+    // Draw directional buttons
+    drawBtn(bounds.left.x, bounds.left.y, bounds.left.r, '\u25C0', touchState.left, 24);
+    drawBtn(bounds.right.x, bounds.right.y, bounds.right.r, '\u25B6', touchState.right, 24);
+
+    // Draw action buttons
+    drawBtn(bounds.jump.x, bounds.jump.y, bounds.jump.r, 'JUMP', touchState.jump, 18);
+    drawBtn(bounds.dash.x, bounds.dash.y, bounds.dash.r, 'DASH', touchState.dash, 13);
+
+    // Draw pause button
+    drawBtn(bounds.pause.x, bounds.pause.y, bounds.pause.r, '\u23F8', false, 18);
+
+    // Reset text alignment
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+}
 
 // ============================================================
 // PARTICLE SYSTEM

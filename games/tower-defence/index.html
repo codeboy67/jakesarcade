@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Tower Defence TD — Jake's Arcade</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 100%; height: 100%; overflow: hidden; background: #111; font-family: 'Segoe UI', Arial, sans-serif; }
-canvas { display: block; }
+canvas { display: block; touch-action: none; }
 #backLink {
   position: fixed; top: 12px; left: 16px; z-index: 100;
   color: #aed581; text-decoration: none; font-size: 14px; font-weight: bold;
@@ -209,6 +209,20 @@ function getRankColor(rank) {
   if (rank === 3) return '#CD7F32'; // Bronze
   return '#ffffff';
 }
+
+// --- Touch Device Detection ---
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+// --- Virtual Keyboard State (touch devices only) ---
+let virtualKeyboardVisible = false;
+const vkRows = [
+  ['Q','W','E','R','T','Y','U','I','O','P'],
+  ['A','S','D','F','G','H','J','K','L'],
+  ['Z','X','C','V','B','N','M'],
+  ['1','2','3','4','5','6','7','8','9','0'],
+  ['SPACE','BKSP','ENTER']
+];
+let vkBounds = []; // array of {key, x, y, w, h} for hit testing
 
 // Dynamic button rects for game over / win (updated during draw)
 let gameOverBtn = { x: 0, y: 0, w: 180, h: 50 };
@@ -1548,7 +1562,67 @@ function drawNameInput(cx, startY) {
   ctx.fillStyle = '#78909c';
   ctx.font = '12px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('Press ENTER to confirm (max 12 chars)', cx, py + panelH - 10);
+  if (isTouchDevice) {
+    ctx.fillText('Tap keys below (max 12 chars)', cx, py + panelH - 10);
+    // Draw virtual keyboard below the name input panel
+    drawVirtualKeyboard(cx, py + panelH + 10);
+  } else {
+    ctx.fillText('Press ENTER to confirm (max 12 chars)', cx, py + panelH - 10);
+  }
+}
+
+// --- Virtual Keyboard Drawing (touch devices) ---
+function drawVirtualKeyboard(cx, startY) {
+  vkBounds = []; // reset hit targets each frame
+  const keyH = 46;
+  const keyGap = 4;
+  const rowGap = 4;
+  let curY = startY;
+
+  for (let r = 0; r < vkRows.length; r++) {
+    const row = vkRows[r];
+    // Calculate total width of this row
+    let totalW = 0;
+    const keyWidths = [];
+    for (let k = 0; k < row.length; k++) {
+      let kw;
+      if (row[k] === 'SPACE') kw = 120;
+      else if (row[k] === 'BKSP' || row[k] === 'ENTER') kw = 90;
+      else kw = 44;
+      keyWidths.push(kw);
+      totalW += kw + (k < row.length - 1 ? keyGap : 0);
+    }
+    let curX = cx - totalW / 2;
+
+    for (let k = 0; k < row.length; k++) {
+      const key = row[k];
+      const kw = keyWidths[k];
+
+      // Key background
+      ctx.fillStyle = '#37474f';
+      ctx.fillRect(curX, curY, kw, keyH);
+      ctx.strokeStyle = '#546e7a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(curX, curY, kw, keyH);
+
+      // Key label
+      ctx.fillStyle = '#eceff1';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      let label = key;
+      if (key === 'BKSP') label = '\u2190';
+      else if (key === 'ENTER') label = '\u21B5';
+      else if (key === 'SPACE') label = 'SPACE';
+      ctx.fillText(label, curX + kw / 2, curY + keyH / 2);
+
+      // Store bounds for hit testing
+      vkBounds.push({ key, x: curX, y: curY, w: kw, h: keyH });
+
+      curX += kw + keyGap;
+    }
+    curY += keyH + rowGap;
+  }
 }
 
 // --- Leaderboard Panel Drawing ---
@@ -1868,10 +1942,9 @@ canvas.addEventListener('mousemove', (e) => {
   mouseY = e.clientY;
 });
 
-canvas.addEventListener('click', (e) => {
+// --- Shared click handler (used by both mouse click and touch) ---
+function handleCanvasClick() {
   initAudio();
-  mouseX = e.clientX;
-  mouseY = e.clientY;
 
   // Pause overlay button clicks
   if (paused) {
@@ -1903,8 +1976,13 @@ canvas.addEventListener('click', (e) => {
   }
 
   if (state === STATE.GAMEOVER || state === STATE.WIN) {
-    // If entering name, ignore clicks (keyboard only)
-    if (enteringName) return;
+    // If entering name, handle virtual keyboard taps on touch devices
+    if (enteringName) {
+      if (isTouchDevice) {
+        handleVirtualKeyboardTap(mouseX, mouseY);
+      }
+      return;
+    }
 
     const btn = (state === STATE.GAMEOVER) ? gameOverBtn : winBtn;
     if (mouseX >= btn.x && mouseX <= btn.x + btn.w && mouseY >= btn.y && mouseY <= btn.y + btn.h) {
@@ -1995,6 +2073,41 @@ canvas.addEventListener('click', (e) => {
   // Click on empty space — deselect
   selectedTower = null;
   selectedTowerType = null;
+}
+
+// --- Virtual Keyboard Tap Handler ---
+function handleVirtualKeyboardTap(tx, ty) {
+  for (const vk of vkBounds) {
+    if (tx >= vk.x && tx <= vk.x + vk.w && ty >= vk.y && ty <= vk.y + vk.h) {
+      if (vk.key === 'ENTER') {
+        const finalName = nameInputText.trim() || 'PLAYER';
+        addLeaderboardEntry(finalName, pendingScore);
+        enteringName = false;
+        playSound('click');
+      } else if (vk.key === 'BKSP') {
+        nameInputText = nameInputText.slice(0, -1);
+        playSound('click');
+      } else if (vk.key === 'SPACE') {
+        if (nameInputText.length < 12) {
+          nameInputText += ' ';
+        }
+        playSound('click');
+      } else {
+        // Regular character key
+        if (nameInputText.length < 12) {
+          nameInputText += vk.key;
+          playSound('click');
+        }
+      }
+      return;
+    }
+  }
+}
+
+canvas.addEventListener('click', (e) => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  handleCanvasClick();
 });
 
 // Right click to deselect
@@ -2003,6 +2116,26 @@ canvas.addEventListener('contextmenu', (e) => {
   selectedTowerType = null;
   selectedTower = null;
 });
+
+// --- Touch Event Handlers ---
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  mouseX = t.clientX;
+  mouseY = t.clientY;
+  handleCanvasClick();
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  mouseX = t.clientX;
+  mouseY = t.clientY;
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+}, { passive: false });
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {

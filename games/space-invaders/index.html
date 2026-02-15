@@ -154,6 +154,239 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => { keys[e.key] = false; });
 
+// --- Touch Device Detection & Controls ---
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+let touchControls = { left: false, right: false, fire: false, pause: false };
+
+// Touch button definitions (will be recalculated on draw for responsive sizing)
+function getTouchButtons() {
+    return {
+        left:  { x: 80,  y: canvas.height - 90,  r: 55, label: '\u25C0' },
+        right: { x: 220, y: canvas.height - 90,  r: 55, label: '\u25B6' },
+        fire:  { x: canvas.width - 100, y: canvas.height - 100, r: 65, label: 'FIRE' },
+        pause: { x: canvas.width - 40,  y: 40,   r: 25, label: '\u23F8' }
+    };
+}
+
+function pointInCircle(px, py, cx, cy, r) {
+    const dx = px - cx;
+    const dy = py - cy;
+    return dx * dx + dy * dy <= r * r;
+}
+
+function handleTouchInput(e) {
+    e.preventDefault();
+    if (!isTouchDevice) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const buttons = getTouchButtons();
+
+    // Reset all touch controls
+    touchControls.left = false;
+    touchControls.right = false;
+    touchControls.fire = false;
+    touchControls.pause = false;
+
+    // Check each active touch against button regions
+    for (let i = 0; i < e.touches.length; i++) {
+        const touch = e.touches[i];
+        const tx = (touch.clientX - rect.left) * scaleX;
+        const ty = (touch.clientY - rect.top) * scaleY;
+
+        if (pointInCircle(tx, ty, buttons.left.x, buttons.left.y, buttons.left.r)) {
+            touchControls.left = true;
+        }
+        if (pointInCircle(tx, ty, buttons.right.x, buttons.right.y, buttons.right.r)) {
+            touchControls.right = true;
+        }
+        if (pointInCircle(tx, ty, buttons.fire.x, buttons.fire.y, buttons.fire.r)) {
+            touchControls.fire = true;
+        }
+        if (pointInCircle(tx, ty, buttons.pause.x, buttons.pause.y, buttons.pause.r)) {
+            touchControls.pause = true;
+        }
+    }
+
+    // Map touch controls to key states so existing game logic works
+    keys['ArrowLeft'] = touchControls.left;
+    keys['ArrowRight'] = touchControls.right;
+    keys[' '] = touchControls.fire;
+}
+
+function handleTouchEnd(e) {
+    e.preventDefault();
+    if (!isTouchDevice) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const buttons = getTouchButtons();
+
+    // Determine which buttons are still held by remaining touches
+    touchControls.left = false;
+    touchControls.right = false;
+    touchControls.fire = false;
+    touchControls.pause = false;
+
+    for (let i = 0; i < e.touches.length; i++) {
+        const touch = e.touches[i];
+        const tx = (touch.clientX - rect.left) * scaleX;
+        const ty = (touch.clientY - rect.top) * scaleY;
+
+        if (pointInCircle(tx, ty, buttons.left.x, buttons.left.y, buttons.left.r)) {
+            touchControls.left = true;
+        }
+        if (pointInCircle(tx, ty, buttons.right.x, buttons.right.y, buttons.right.r)) {
+            touchControls.right = true;
+        }
+        if (pointInCircle(tx, ty, buttons.fire.x, buttons.fire.y, buttons.fire.r)) {
+            touchControls.fire = true;
+        }
+        if (pointInCircle(tx, ty, buttons.pause.x, buttons.pause.y, buttons.pause.r)) {
+            touchControls.pause = true;
+        }
+    }
+
+    keys['ArrowLeft'] = touchControls.left;
+    keys['ArrowRight'] = touchControls.right;
+    keys[' '] = touchControls.fire;
+}
+
+// Track pause button state to detect tap (press and release)
+let touchPauseWasPressed = false;
+
+function handleTouchStartActions(e) {
+    if (!isTouchDevice) return;
+    initAudio(); // Ensure audio context is initialized on first touch
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const buttons = getTouchButtons();
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const touch = e.changedTouches[i];
+        const tx = (touch.clientX - rect.left) * scaleX;
+        const ty = (touch.clientY - rect.top) * scaleY;
+
+        // Pause button tap detection
+        if (pointInCircle(tx, ty, buttons.pause.x, buttons.pause.y, buttons.pause.r)) {
+            if (state === 'playing' || state === 'bossIntro') {
+                stateBeforePause = state;
+                state = 'paused';
+            } else if (state === 'paused') {
+                state = stateBeforePause;
+                stateBeforePause = null;
+            }
+        }
+
+        // Menu / Game Over: tap anywhere in center area to start
+        if (state === 'menu' || state === 'gameover') {
+            startGame();
+        }
+
+        // Name Entry: tap to submit with default name
+        if (state === 'nameEntry') {
+            const finalName = nameEntryText.trim() || 'PLAYER';
+            addToLeaderboard(finalName, score);
+            state = 'gameover';
+        }
+
+        // Pause menu buttons
+        if (state === 'paused') {
+            const cx = canvas.width / 2;
+            const btnW = 260, btnH = 50;
+            const resumeY = canvas.height / 2 + 10;
+            const menuY = canvas.height / 2 + 80;
+
+            if (tx >= cx - btnW / 2 && tx <= cx + btnW / 2 && ty >= resumeY && ty <= resumeY + btnH) {
+                state = stateBeforePause;
+                stateBeforePause = null;
+            }
+            if (tx >= cx - btnW / 2 && tx <= cx + btnW / 2 && ty >= menuY && ty <= menuY + btnH) {
+                window.location.href = '../../index.html';
+            }
+        }
+    }
+}
+
+canvas.addEventListener('touchstart', function(e) {
+    handleTouchStartActions(e);
+    handleTouchInput(e);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', function(e) {
+    handleTouchInput(e);
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+    handleTouchEnd(e);
+}, { passive: false });
+
+canvas.addEventListener('touchcancel', function(e) {
+    handleTouchEnd(e);
+}, { passive: false });
+
+function drawTouchControls() {
+    if (!isTouchDevice) return;
+    // Only draw during active gameplay states
+    if (state !== 'playing' && state !== 'bossIntro') return;
+
+    const buttons = getTouchButtons();
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Left button
+    ctx.globalAlpha = touchControls.left ? 0.55 : 0.35;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(buttons.left.x, buttons.left.y, buttons.left.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = touchControls.left ? 0.9 : 0.7;
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 36px Courier New';
+    ctx.fillText(buttons.left.label, buttons.left.x, buttons.left.y);
+
+    // Right button
+    ctx.globalAlpha = touchControls.right ? 0.55 : 0.35;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(buttons.right.x, buttons.right.y, buttons.right.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = touchControls.right ? 0.9 : 0.7;
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 36px Courier New';
+    ctx.fillText(buttons.right.label, buttons.right.x, buttons.right.y);
+
+    // Fire button
+    ctx.globalAlpha = touchControls.fire ? 0.55 : 0.35;
+    ctx.fillStyle = '#f44';
+    ctx.beginPath();
+    ctx.arc(buttons.fire.x, buttons.fire.y, buttons.fire.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = touchControls.fire ? 0.95 : 0.8;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 24px Courier New';
+    ctx.fillText(buttons.fire.label, buttons.fire.x, buttons.fire.y);
+
+    // Pause button
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(buttons.pause.x, buttons.pause.y, buttons.pause.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 18px Courier New';
+    ctx.fillText(buttons.pause.label, buttons.pause.x, buttons.pause.y);
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+}
+
 // --- Web Audio API ---
 let audioCtx = null;
 function initAudio() {

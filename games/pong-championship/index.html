@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Pong Championship - Jake's Arcade</title>
@@ -20,6 +20,7 @@ canvas {
     display: block;
     position: fixed;
     top: 0; left: 0;
+    touch-action: none;
 }
 #backLink {
     position: fixed;
@@ -111,6 +112,33 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
+// --- Touch Device Detection ---
+var isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+// Touch state
+var touchPaddleId = null;   // identifier of the touch controlling the paddle
+var touchPaddleActive = false;
+var touchAbilityBtnRadius = 50;
+var touchPauseBtnRadius = 22;
+
+// On-screen keyboard for name entry on touch devices
+var touchKeyboard = {
+    visible: false,
+    keys: [
+        ['Q','W','E','R','T','Y','U','I','O','P'],
+        ['A','S','D','F','G','H','J','K','L'],
+        ['Z','X','C','V','B','N','M'],
+        ['1','2','3','4','5','6','7','8','9','0'],
+        ['SPACE','DEL','OK']
+    ],
+    keyWidth: 0,
+    keyHeight: 0,
+    startX: 0,
+    startY: 0,
+    rowPadding: 4,
+    keyPadding: 3
+};
+
 // --- Constants ---
 var PADDLE_WIDTH_RATIO = 0.015;
 var PADDLE_HEIGHT_RATIO = 0.15;
@@ -128,7 +156,9 @@ var stateBeforePause = null;
 var pauseResumeBtn = null;
 var pauseMenuBtn = null;
 var menuSelection = 0;
-var menuOptions = ['VS AI - Easy', 'VS AI - Medium', 'VS AI - Hard', 'Local 2 Player'];
+var menuOptions = isTouchDevice
+    ? ['VS AI - Easy', 'VS AI - Medium', 'VS AI - Hard']
+    : ['VS AI - Easy', 'VS AI - Medium', 'VS AI - Hard', 'Local 2 Player'];
 var isVsAI = true;
 var aiDifficulty = 1;
 
@@ -313,6 +343,209 @@ window.addEventListener('keydown', function(e) {
 window.addEventListener('keyup', function(e) {
     keys[e.code] = false;
 });
+
+// --- Touch Event Handlers ---
+if (isTouchDevice) {
+    // Prevent default on all touch events to avoid scrolling/zooming
+    canvas.addEventListener('touchstart', function(e) { e.preventDefault(); }, { passive: false });
+    canvas.addEventListener('touchmove', function(e) { e.preventDefault(); }, { passive: false });
+    canvas.addEventListener('touchend', function(e) { e.preventDefault(); }, { passive: false });
+
+    // Helper: get touch position relative to canvas
+    function getTouchPos(touch) {
+        var rect = canvas.getBoundingClientRect();
+        return {
+            x: (touch.clientX - rect.left) * (canvas.width / rect.width),
+            y: (touch.clientY - rect.top) * (canvas.height / rect.height)
+        };
+    }
+
+    // Helper: check if point is inside ability button
+    function isTouchInAbilityBtn(tx, ty) {
+        var btnX = canvas.width - 80;
+        var btnY = canvas.height - 80;
+        var dx = tx - btnX;
+        var dy = ty - btnY;
+        return (dx * dx + dy * dy) <= (touchAbilityBtnRadius + 10) * (touchAbilityBtnRadius + 10);
+    }
+
+    // Helper: check if point is inside pause button
+    function isTouchInPauseBtn(tx, ty) {
+        var btnX = canvas.width - 40;
+        var btnY = 40;
+        var dx = tx - btnX;
+        var dy = ty - btnY;
+        return (dx * dx + dy * dy) <= (touchPauseBtnRadius + 10) * (touchPauseBtnRadius + 10);
+    }
+
+    // Helper: check if point is inside a rectangle
+    function isTouchInRect(tx, ty, rx, ry, rw, rh) {
+        return tx >= rx && tx <= rx + rw && ty >= ry && ty <= ry + rh;
+    }
+
+    // Helper: get keyboard key at touch position
+    function getKeyboardKeyAt(tx, ty) {
+        var kb = touchKeyboard;
+        if (!kb.visible) return null;
+        for (var row = 0; row < kb.keys.length; row++) {
+            var rowKeys = kb.keys[row];
+            var rowY = kb.startY + row * (kb.keyHeight + kb.rowPadding);
+            // Center the row
+            var totalRowWidth = 0;
+            for (var k = 0; k < rowKeys.length; k++) {
+                var keyLabel = rowKeys[k];
+                var kw = kb.keyWidth;
+                if (keyLabel === 'SPACE') kw = kb.keyWidth * 3 + kb.keyPadding * 2;
+                else if (keyLabel === 'DEL' || keyLabel === 'OK') kw = kb.keyWidth * 1.8;
+                totalRowWidth += kw + kb.keyPadding;
+            }
+            totalRowWidth -= kb.keyPadding;
+            var rowX = kb.startX + (canvas.width * 0.8 - totalRowWidth) / 2;
+
+            for (var k = 0; k < rowKeys.length; k++) {
+                var keyLabel = rowKeys[k];
+                var kw = kb.keyWidth;
+                if (keyLabel === 'SPACE') kw = kb.keyWidth * 3 + kb.keyPadding * 2;
+                else if (keyLabel === 'DEL' || keyLabel === 'OK') kw = kb.keyWidth * 1.8;
+
+                if (tx >= rowX && tx <= rowX + kw && ty >= rowY && ty <= rowY + kb.keyHeight) {
+                    return keyLabel;
+                }
+                rowX += kw + kb.keyPadding;
+            }
+        }
+        return null;
+    }
+
+    canvas.addEventListener('touchstart', function(e) {
+        ensureAudio();
+
+        for (var i = 0; i < e.changedTouches.length; i++) {
+            var touch = e.changedTouches[i];
+            var pos = getTouchPos(touch);
+
+            if (gameState === STATE.MENU) {
+                // Tap on a menu option
+                handleMenuTouch(pos.x, pos.y);
+            } else if (gameState === STATE.PLAYING || gameState === STATE.COUNTDOWN) {
+                // Check pause button first
+                if (isTouchInPauseBtn(pos.x, pos.y)) {
+                    stateBeforePause = gameState;
+                    gameState = STATE.PAUSED;
+                    continue;
+                }
+
+                // Check ability button (right side, only during PLAYING)
+                if (gameState === STATE.PLAYING && p1AbilityCharge >= ABILITY_MAX && !p1AbilityActive && isTouchInAbilityBtn(pos.x, pos.y)) {
+                    activateAbility(1);
+                    continue;
+                }
+
+                // Left half of screen: paddle control
+                if (pos.x < canvas.width / 2) {
+                    touchPaddleId = touch.identifier;
+                    touchPaddleActive = true;
+                    if (paddle1) {
+                        paddle1.y = pos.y - paddle1.height / 2;
+                        paddle1.y = Math.max(0, Math.min(canvas.height - paddle1.height, paddle1.y));
+                    }
+                }
+            } else if (gameState === STATE.PAUSED) {
+                // Check pause screen buttons
+                if (pauseResumeBtn && isTouchInRect(pos.x, pos.y, pauseResumeBtn.x, pauseResumeBtn.y, pauseResumeBtn.w, pauseResumeBtn.h)) {
+                    gameState = stateBeforePause || STATE.PLAYING;
+                } else if (pauseMenuBtn && isTouchInRect(pos.x, pos.y, pauseMenuBtn.x, pauseMenuBtn.y, pauseMenuBtn.w, pauseMenuBtn.h)) {
+                    window.location.href = '../../index.html';
+                }
+            } else if (gameState === STATE.SET_OVER) {
+                startSet();
+            } else if (gameState === STATE.MATCH_OVER) {
+                if (isTopTenScore(matchWinnerScore)) {
+                    nameEntryText = '';
+                    nameEntryCursorBlink = 0;
+                    gameState = STATE.NAME_ENTRY;
+                } else {
+                    gameState = STATE.MENU;
+                }
+            } else if (gameState === STATE.NAME_ENTRY) {
+                // Handle on-screen keyboard tap
+                var keyHit = getKeyboardKeyAt(pos.x, pos.y);
+                if (keyHit) {
+                    if (keyHit === 'OK') {
+                        var finalName = nameEntryText.trim() || 'PLAYER';
+                        addToLeaderboard(finalName, matchWinnerScore);
+                        gameState = STATE.MENU;
+                    } else if (keyHit === 'DEL') {
+                        nameEntryText = nameEntryText.slice(0, -1);
+                    } else if (keyHit === 'SPACE') {
+                        if (nameEntryText.length < 12) nameEntryText += ' ';
+                    } else {
+                        if (nameEntryText.length < 12) nameEntryText += keyHit;
+                    }
+                    playMenuSelect();
+                }
+            }
+        }
+    }, false);
+
+    canvas.addEventListener('touchmove', function(e) {
+        if (!touchPaddleActive) return;
+        for (var i = 0; i < e.changedTouches.length; i++) {
+            var touch = e.changedTouches[i];
+            if (touch.identifier === touchPaddleId) {
+                var pos = getTouchPos(touch);
+                if (paddle1 && (gameState === STATE.PLAYING || gameState === STATE.COUNTDOWN)) {
+                    paddle1.y = pos.y - paddle1.height / 2;
+                    paddle1.y = Math.max(0, Math.min(canvas.height - paddle1.height, paddle1.y));
+                }
+            }
+        }
+    }, false);
+
+    canvas.addEventListener('touchend', function(e) {
+        for (var i = 0; i < e.changedTouches.length; i++) {
+            var touch = e.changedTouches[i];
+            if (touch.identifier === touchPaddleId) {
+                touchPaddleActive = false;
+                touchPaddleId = null;
+            }
+        }
+    }, false);
+
+    canvas.addEventListener('touchcancel', function(e) {
+        for (var i = 0; i < e.changedTouches.length; i++) {
+            var touch = e.changedTouches[i];
+            if (touch.identifier === touchPaddleId) {
+                touchPaddleActive = false;
+                touchPaddleId = null;
+            }
+        }
+    }, false);
+
+    // Handle menu touch: determine which option was tapped
+    function handleMenuTouch(tx, ty) {
+        var cw = canvas.width;
+        var ch = canvas.height;
+        var optSize = Math.min(26, cw * 0.026);
+        var spacing = optSize * 2.4;
+        var startY = ch * 0.41;
+
+        for (var i = 0; i < menuOptions.length; i++) {
+            var yPos = startY + i * spacing;
+            var boxW = cw * 0.5; // wider hit area for touch
+            var boxH = spacing * 0.85;
+            var boxX = cw / 2 - boxW / 2;
+            var boxY = yPos - boxH / 2;
+
+            if (tx >= boxX && tx <= boxX + boxW && ty >= boxY && ty <= boxY + boxH) {
+                menuSelection = i;
+                playMenuConfirm();
+                startMatch(menuSelection);
+                return;
+            }
+        }
+    }
+}
 
 // --- Helper Functions ---
 function pw() { return Math.max(canvas.width * PADDLE_WIDTH_RATIO, 10); }
