@@ -45,7 +45,7 @@ const MINIMAP_PADDING = 10;
 const T = { WALL: 0, FLOOR: 1, CORRIDOR: 2, STAIRS: 3, CHEST: 4, DOOR: 5 };
 
 // Game states
-const STATE = { MENU: 0, PLAYING: 1, LEVELUP: 2, DEAD: 3, PAUSED: 4 };
+const STATE = { MENU: 0, PLAYING: 1, LEVELUP: 2, DEAD: 3, PAUSED: 4, NAME_ENTRY: 5 };
 
 // Weapon data
 const WEAPONS = [
@@ -237,6 +237,49 @@ let openedChests = new Set();
 let notifications = [];
 let stateBeforePause = STATE.PLAYING;
 
+// --- Leaderboard ---
+const LEADERBOARD_KEY = 'dungeonCrawlerLeaderboard';
+let nameEntryText = 'PLAYER';
+let nameEntryCursorBlink = 0;
+let nameEntryScore = 0;
+
+function getLeaderboard() {
+    try {
+        const data = localStorage.getItem(LEADERBOARD_KEY);
+        if (data) return JSON.parse(data);
+    } catch(e) {}
+    return [];
+}
+
+function saveLeaderboard(board) {
+    try {
+        localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(board));
+    } catch(e) {}
+}
+
+function isTopTenScore(score) {
+    const board = getLeaderboard();
+    if (board.length < 10) return true;
+    return score > board[board.length - 1].score;
+}
+
+function addLeaderboardEntry(name, score, floor, gold) {
+    const board = getLeaderboard();
+    board.push({ name: name.substring(0, 12), score, floor, gold, date: Date.now() });
+    // Sort by score descending (score = floor * 1000 + gold), then by date ascending
+    board.sort((a, b) => b.score - a.score || a.date - b.date);
+    // Keep top 10
+    while (board.length > 10) board.pop();
+    saveLeaderboard(board);
+    return board;
+}
+
+function computeScore() {
+    // Score is based on deepest floor reached * 1000 + total gold collected
+    // This way floor is the primary ranking factor, gold is the tiebreaker
+    return stats.floorsReached * 1000 + stats.totalGold;
+}
+
 // --- Resize ---
 function resize() {
     canvas.width = window.innerWidth;
@@ -247,6 +290,26 @@ resize();
 
 // --- Input ---
 window.addEventListener('keydown', e => {
+    // --- Name Entry input handling (intercept all keys) ---
+    if (gameState === STATE.NAME_ENTRY) {
+        e.preventDefault();
+        if (e.key === 'Enter') {
+            const finalName = nameEntryText.trim() || 'PLAYER';
+            addLeaderboardEntry(finalName, nameEntryScore, stats.floorsReached, stats.totalGold);
+            gameState = STATE.DEAD;
+        } else if (e.key === 'Backspace') {
+            nameEntryText = nameEntryText.slice(0, -1);
+        } else if (e.key === 'Escape') {
+            // Submit default name and go to death screen
+            addLeaderboardEntry(nameEntryText.trim() || 'PLAYER', nameEntryScore, stats.floorsReached, stats.totalGold);
+            gameState = STATE.DEAD;
+        } else if (e.key.length === 1 && nameEntryText.length < 12) {
+            // Only allow printable characters
+            nameEntryText += e.key.toUpperCase();
+        }
+        return; // Do NOT set keys[] during name entry
+    }
+
     keys[e.key.toLowerCase()] = true;
     if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
 
@@ -979,7 +1042,13 @@ function updateMonsters(dt) {
             });
 
             if (player.hp <= 0) {
-                gameState = STATE.DEAD;
+                nameEntryScore = computeScore();
+                if (isTopTenScore(nameEntryScore)) {
+                    nameEntryText = 'PLAYER';
+                    gameState = STATE.NAME_ENTRY;
+                } else {
+                    gameState = STATE.DEAD;
+                }
                 Audio.play('death');
             }
         }
@@ -1023,7 +1092,13 @@ function updateProjectiles(dt) {
             projectiles.splice(i, 1);
 
             if (player.hp <= 0) {
-                gameState = STATE.DEAD;
+                nameEntryScore = computeScore();
+                if (isTopTenScore(nameEntryScore)) {
+                    nameEntryText = 'PLAYER';
+                    gameState = STATE.NAME_ENTRY;
+                } else {
+                    gameState = STATE.DEAD;
+                }
                 Audio.play('death');
             }
         }
@@ -1766,34 +1841,163 @@ function drawLevelUpScreen() {
     mouse.clicked = false;
 }
 
-function drawDeathScreen() {
+function drawNameEntryScreen() {
     ctx.fillStyle = 'rgba(20, 0, 0, 0.85)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.font = 'bold 48px Courier New';
     ctx.fillStyle = '#a00';
     ctx.textAlign = 'center';
-    ctx.fillText('YOU DIED', canvas.width / 2, canvas.height / 2 - 120);
+    ctx.fillText('YOU DIED', canvas.width / 2, canvas.height / 2 - 160);
+
+    // Score info
+    ctx.font = '18px Courier New';
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText(`NEW HIGH SCORE!`, canvas.width / 2, canvas.height / 2 - 110);
+    ctx.fillStyle = '#ccc';
+    ctx.fillText(`Floor ${stats.floorsReached}  |  ${stats.totalGold} Gold  |  Score: ${nameEntryScore}`, canvas.width / 2, canvas.height / 2 - 80);
+
+    // Name entry prompt
+    ctx.font = 'bold 22px Courier New';
+    ctx.fillStyle = '#fd0';
+    ctx.fillText('ENTER YOUR NAME:', canvas.width / 2, canvas.height / 2 - 30);
+
+    // Name input box
+    const boxW = 300;
+    const boxH = 44;
+    const boxX = canvas.width / 2 - boxW / 2;
+    const boxY = canvas.height / 2 - 10;
+
+    ctx.fillStyle = '#1a1008';
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.strokeStyle = '#fd0';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+    // Typed text with blinking cursor
+    nameEntryCursorBlink += 0.04;
+    const cursorVisible = Math.sin(nameEntryCursorBlink * 3) > 0;
+    const displayText = nameEntryText + (cursorVisible ? '_' : ' ');
+
+    ctx.font = 'bold 24px Courier New';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.fillText(displayText, canvas.width / 2, boxY + 30);
+
+    // Instructions
+    ctx.font = '13px Courier New';
+    ctx.fillStyle = '#888';
+    ctx.fillText('Type your name (max 12 chars) and press ENTER', canvas.width / 2, boxY + 65);
+}
+
+function drawLeaderboardPanel(x, y, w, maxEntries, title) {
+    const board = getLeaderboard();
+    const entries = board.slice(0, maxEntries);
+    const lineH = 24;
+    const headerH = 36;
+    const h = headerH + 10 + Math.max(entries.length, 1) * lineH + 10;
+
+    // Panel background
+    ctx.fillStyle = 'rgba(10, 8, 6, 0.85)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = '#665';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+
+    // Title
+    ctx.font = 'bold 18px Courier New';
+    ctx.fillStyle = '#FFD700';
+    ctx.textAlign = 'center';
+    ctx.fillText(title, x + w / 2, y + 26);
+
+    // Divider
+    ctx.strokeStyle = '#554';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + 15, y + headerH);
+    ctx.lineTo(x + w - 15, y + headerH);
+    ctx.stroke();
+
+    if (entries.length === 0) {
+        ctx.font = '14px Courier New';
+        ctx.fillStyle = '#666';
+        ctx.textAlign = 'center';
+        ctx.fillText('No scores yet', x + w / 2, y + headerH + 26);
+        return h;
+    }
+
+    // Column headers
+    ctx.font = 'bold 11px Courier New';
+    ctx.fillStyle = '#886';
+    ctx.textAlign = 'left';
+    ctx.fillText('#', x + 12, y + headerH + 16);
+    ctx.fillText('NAME', x + 38, y + headerH + 16);
+    ctx.textAlign = 'right';
+    ctx.fillText('FLOOR', x + w - 80, y + headerH + 16);
+    ctx.fillText('SCORE', x + w - 12, y + headerH + 16);
+
+    // Entries
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const ey = y + headerH + 18 + (i + 1) * lineH;
+        let color;
+        if (i === 0) color = '#FFD700'; // Gold
+        else if (i === 1) color = '#C0C0C0'; // Silver
+        else if (i === 2) color = '#CD7F32'; // Bronze
+        else color = '#ccc';
+
+        ctx.font = 'bold 14px Courier New';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'left';
+        ctx.fillText(`${i + 1}.`, x + 12, ey);
+        ctx.fillText(entry.name, x + 38, ey);
+        ctx.textAlign = 'right';
+        ctx.fillText(`F${entry.floor}`, x + w - 80, ey);
+        ctx.font = '14px Courier New';
+        ctx.fillText(`${entry.score}`, x + w - 12, ey);
+    }
+
+    return h;
+}
+
+function drawDeathScreen() {
+    ctx.fillStyle = 'rgba(20, 0, 0, 0.85)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Layout: stats on left side, leaderboard on right side (or stacked if narrow)
+    const wide = canvas.width > 800;
+    const cx = canvas.width / 2;
+
+    ctx.font = 'bold 48px Courier New';
+    ctx.fillStyle = '#a00';
+    ctx.textAlign = 'center';
+    ctx.fillText('YOU DIED', cx, wide ? 80 : canvas.height / 2 - 200);
+
+    // Stats
+    const statsX = wide ? cx - 260 : cx;
+    const statsTopY = wide ? 120 : canvas.height / 2 - 150;
 
     ctx.font = '18px Courier New';
     ctx.fillStyle = '#ccc';
+    ctx.textAlign = 'center';
     const lines = [
         `Floor Reached: ${stats.floorsReached}`,
         `Level: ${player.level}`,
         `Monsters Slain: ${stats.monstersKilled}`,
         `Gold Collected: ${stats.totalGold}`,
         `Weapon: ${WEAPONS[player.weaponIndex].name}`,
-        `Armour: ${ARMOURS[player.armourIndex].name}`
+        `Armour: ${ARMOURS[player.armourIndex].name}`,
+        `Score: ${computeScore()}`
     ];
     for (let i = 0; i < lines.length; i++) {
-        ctx.fillText(lines[i], canvas.width / 2, canvas.height / 2 - 50 + i * 28);
+        ctx.fillText(lines[i], statsX, statsTopY + i * 26);
     }
 
     // Restart button
     const btnW = 220;
     const btnH = 45;
-    const btnX = canvas.width / 2 - btnW / 2;
-    const btnY = canvas.height / 2 + 130;
+    const btnX = statsX - btnW / 2;
+    const btnY = statsTopY + lines.length * 26 + 20;
     const hover = mouse.x > btnX && mouse.x < btnX + btnW &&
                   mouse.y > btnY && mouse.y < btnY + btnH;
 
@@ -1805,7 +2009,18 @@ function drawDeathScreen() {
 
     ctx.font = 'bold 20px Courier New';
     ctx.fillStyle = hover ? '#fff' : '#ddd';
-    ctx.fillText('PLAY AGAIN', canvas.width / 2, btnY + 30);
+    ctx.textAlign = 'center';
+    ctx.fillText('PLAY AGAIN', statsX, btnY + 30);
+
+    // Leaderboard panel
+    const lbW = 340;
+    if (wide) {
+        drawLeaderboardPanel(cx + 20, 110, lbW, 10, 'TOP 10 LEADERBOARD');
+    } else {
+        const lbX = cx - lbW / 2;
+        const lbY = btnY + btnH + 20;
+        drawLeaderboardPanel(lbX, lbY, lbW, 10, 'TOP 10 LEADERBOARD');
+    }
 
     if ((hover && mouse.clicked) || keys['enter'] || keys[' ']) {
         mouse.clicked = false;
@@ -1952,6 +2167,15 @@ function drawMenuScreen() {
     ctx.font = '13px Courier New';
     ctx.fillStyle = '#887';
     ctx.fillText('Explore floors, fight monsters, find loot!', canvas.width / 2, panelY + panelH + 20);
+
+    // Leaderboard panel (top 5) below controls
+    const lbBoard = getLeaderboard();
+    if (lbBoard.length > 0) {
+        const lbW = 320;
+        const lbX = canvas.width / 2 - lbW / 2;
+        const lbY = panelY + panelH + 35;
+        drawLeaderboardPanel(lbX, lbY, lbW, 5, 'HIGH SCORES');
+    }
 
     // Floating particles on menu
     const time = Date.now() * 0.001;
@@ -2152,6 +2376,11 @@ function gameLoop(timestamp) {
         case STATE.DEAD:
             backLink.style.display = 'none';
             drawDeathScreen();
+            break;
+
+        case STATE.NAME_ENTRY:
+            backLink.style.display = 'none';
+            drawNameEntryScreen();
             break;
 
         case STATE.PAUSED:
