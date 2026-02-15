@@ -159,6 +159,10 @@ let lastTime = 0;
 let waveCompleteBonus = 0;
 let message = '';
 let messageTimer = 0;
+let paused = false;
+let stateBeforePause = null;
+let pauseResumeBtn = { x: 0, y: 0, w: 260, h: 50 };
+let pauseMenuBtn = { x: 0, y: 0, w: 260, h: 50 };
 
 // --- Tower Definitions ---
 const TOWER_DEFS = {
@@ -1304,6 +1308,63 @@ function drawWin() {
   ctx.fillText('PLAY AGAIN', cx, by + btnH / 2);
 }
 
+// --- Pause Overlay ---
+function drawPauseOverlay() {
+  // Dark overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+
+  // PAUSED text
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 56px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('PAUSED', cx, cy - 80);
+
+  // RESUME button (green)
+  const btnW = 260, btnH = 50;
+  pauseResumeBtn.x = cx - btnW / 2;
+  pauseResumeBtn.y = cy - 20;
+  pauseResumeBtn.w = btnW;
+  pauseResumeBtn.h = btnH;
+
+  const resumeHovered = mouseX >= pauseResumeBtn.x && mouseX <= pauseResumeBtn.x + btnW &&
+                         mouseY >= pauseResumeBtn.y && mouseY <= pauseResumeBtn.y + btnH;
+  ctx.fillStyle = resumeHovered ? '#5cb85c' : '#4a4';
+  ctx.fillRect(pauseResumeBtn.x, pauseResumeBtn.y, btnW, btnH);
+  ctx.strokeStyle = '#6c6';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(pauseResumeBtn.x, pauseResumeBtn.y, btnW, btnH);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText('RESUME', cx, pauseResumeBtn.y + btnH / 2);
+
+  // MAIN MENU button (red)
+  pauseMenuBtn.x = cx - btnW / 2;
+  pauseMenuBtn.y = cy + 50;
+  pauseMenuBtn.w = btnW;
+  pauseMenuBtn.h = btnH;
+
+  const menuHovered = mouseX >= pauseMenuBtn.x && mouseX <= pauseMenuBtn.x + btnW &&
+                       mouseY >= pauseMenuBtn.y && mouseY <= pauseMenuBtn.y + btnH;
+  ctx.fillStyle = menuHovered ? '#d55' : '#c44';
+  ctx.fillRect(pauseMenuBtn.x, pauseMenuBtn.y, btnW, btnH);
+  ctx.strokeStyle = '#e66';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(pauseMenuBtn.x, pauseMenuBtn.y, btnW, btnH);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText('MAIN MENU', cx, pauseMenuBtn.y + btnH / 2);
+
+  // Help text
+  ctx.fillStyle = '#78909c';
+  ctx.font = '14px sans-serif';
+  ctx.fillText('Press P to resume | ESC for main menu', cx, pauseMenuBtn.y + btnH + 30);
+}
+
 // --- Main Draw ---
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1324,6 +1385,7 @@ function draw() {
 
   if (state === STATE.GAMEOVER) drawGameOver();
   if (state === STATE.WIN) drawWin();
+  if (paused) drawPauseOverlay();
 }
 
 // --- Game Loop ---
@@ -1342,7 +1404,7 @@ function gameLoop(timestamp) {
     }
   }
 
-  update(dt);
+  if (!paused) update(dt);
   draw();
   requestAnimationFrame(gameLoop);
 }
@@ -1379,6 +1441,21 @@ canvas.addEventListener('click', (e) => {
   initAudio();
   mouseX = e.clientX;
   mouseY = e.clientY;
+
+  // Pause overlay button clicks
+  if (paused) {
+    if (mouseX >= pauseResumeBtn.x && mouseX <= pauseResumeBtn.x + pauseResumeBtn.w &&
+        mouseY >= pauseResumeBtn.y && mouseY <= pauseResumeBtn.y + pauseResumeBtn.h) {
+      paused = false;
+      state = stateBeforePause;
+      stateBeforePause = null;
+      playSound('click');
+    } else if (mouseX >= pauseMenuBtn.x && mouseX <= pauseMenuBtn.x + pauseMenuBtn.w &&
+               mouseY >= pauseMenuBtn.y && mouseY <= pauseMenuBtn.y + pauseMenuBtn.h) {
+      window.location.href = '../../index.html';
+    }
+    return;
+  }
 
   const cx = canvas.width / 2;
   const cy = canvas.height / 2;
@@ -1497,14 +1574,34 @@ canvas.addEventListener('contextmenu', (e) => {
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
-  if (state !== STATE.PLAYING) return;
   const key = e.key.toLowerCase();
+
+  // ESC: navigate to main menu from any non-menu state
+  if (key === 'escape' && state !== STATE.MENU) {
+    window.location.href = '../../index.html';
+    return;
+  }
+
+  // P: toggle pause during gameplay (any non-menu state)
+  if (key === 'p' && state !== STATE.MENU) {
+    if (paused) {
+      paused = false;
+      state = stateBeforePause;
+      stateBeforePause = null;
+    } else {
+      paused = true;
+      stateBeforePause = state;
+    }
+    return;
+  }
+
+  // Other shortcuts only work when playing and not paused
+  if (state !== STATE.PLAYING || paused) return;
   if (key === '1') { selectedTowerType = 'arrow'; selectedTower = null; }
   if (key === '2') { selectedTowerType = 'cannon'; selectedTower = null; }
   if (key === '3') { selectedTowerType = 'ice'; selectedTower = null; }
   if (key === '4') { selectedTowerType = 'sniper'; selectedTower = null; }
   if (key === '5') { selectedTowerType = 'lightning'; selectedTower = null; }
-  if (key === 'escape') { selectedTowerType = null; selectedTower = null; }
   if (key === ' ' || key === 'enter') { e.preventDefault(); startWave(); }
 });
 
