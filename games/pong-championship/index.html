@@ -187,10 +187,9 @@ var p1AbilityCharge = 0;
 var p2AbilityCharge = 0;
 var ABILITY_MAX = 100;
 var ABILITY_CHARGE_PER_HIT = 20;
-// Ability state: null = none, 'fireball' = next hit is fireball, 'curve' = next hit curves
+// Ability state: null = none, 'fireball' = next hit is fireball
 var p1AbilityActive = null;
 var p2AbilityActive = null;
-// Track which ability to offer next (alternates)
 var p1NextAbility = 'fireball';
 var p2NextAbility = 'fireball';
 
@@ -306,7 +305,6 @@ function createBall(x, y, vx, vy) {
         radius: ballRadius(),
         baseSpeed: speed,
         fireball: false,
-        curve: 0,
         trail: [],
         speedMultiplier: 1
     };
@@ -407,17 +405,14 @@ function activateAbility(player) {
     playAbility();
     if (player === 1) {
         p1AbilityCharge = 0;
-        p1AbilityActive = p1NextAbility;
-        // Alternate for next time
-        p1NextAbility = p1NextAbility === 'fireball' ? 'curve' : 'fireball';
+        p1AbilityActive = 'fireball';
         spawnParticles(paddle1.x + paddle1.width, paddle1.y + paddle1.height / 2,
-            p1AbilityActive === 'fireball' ? '#ff8800' : '#8844ff', 20, 6);
+            '#ff8800', 20, 6);
     } else {
         p2AbilityCharge = 0;
-        p2AbilityActive = p2NextAbility;
-        p2NextAbility = p2NextAbility === 'fireball' ? 'curve' : 'fireball';
+        p2AbilityActive = 'fireball';
         spawnParticles(paddle2.x, paddle2.y + paddle2.height / 2,
-            p2AbilityActive === 'fireball' ? '#ff8800' : '#8844ff', 20, 6);
+            '#ff8800', 20, 6);
     }
 }
 
@@ -565,13 +560,6 @@ function update(dt) {
     for (var bi = balls.length - 1; bi >= 0; bi--) {
         var ball = balls[bi];
 
-        // Apply curve
-        if (ball.curve !== 0) {
-            ball.vy += ball.curve * dt * 600;
-            ball.curve *= Math.pow(0.97, dt * 60);
-            if (Math.abs(ball.curve) < 0.05) ball.curve = 0;
-        }
-
         var effVx = ball.vx * ball.speedMultiplier;
         var effVy = ball.vy * ball.speedMultiplier;
         ball.x += effVx * dt * 60;
@@ -618,12 +606,6 @@ function update(dt) {
                 p1AbilityActive = null;
                 spawnParticles(ball.x, ball.y, '#ff4400', 25, 8);
                 showNotification('FIREBALL!', '#ff6600');
-            } else if (p1AbilityActive === 'curve') {
-                ball.curve = hitPos1 > 0 ? 2.5 : -2.5;
-                p1AbilityActive = null;
-                spawnParticles(ball.x, ball.y, '#8844ff', 20, 6);
-                playCurve();
-                showNotification('CURVE SHOT!', '#aa44ff');
             } else {
                 ball.fireball = false;
                 ball.speedMultiplier = Math.max(1, ball.speedMultiplier * 0.95);
@@ -655,12 +637,6 @@ function update(dt) {
                 p2AbilityActive = null;
                 spawnParticles(ball.x, ball.y, '#ff4400', 25, 8);
                 showNotification('FIREBALL!', '#ff6600');
-            } else if (p2AbilityActive === 'curve') {
-                ball.curve = hitPos2 > 0 ? 2.5 : -2.5;
-                p2AbilityActive = null;
-                spawnParticles(ball.x, ball.y, '#8844ff', 20, 6);
-                playCurve();
-                showNotification('CURVE SHOT!', '#aa44ff');
             } else {
                 ball.fireball = false;
                 ball.speedMultiplier = Math.max(1, ball.speedMultiplier * 0.95);
@@ -992,10 +968,7 @@ function drawGame() {
                     ctx.fillStyle = '#ff6600';
                     ctx.shadowColor = '#ff4400';
                     ctx.shadowBlur = 8;
-                } else if (ball.curve !== 0) {
-                    ctx.fillStyle = '#aa66ff';
-                    ctx.shadowColor = '#8844ff';
-                    ctx.shadowBlur = 6;
+                } else {
                 } else {
                     ctx.fillStyle = '#8888dd';
                     ctx.shadowColor = '#6666bb';
@@ -1014,19 +987,12 @@ function drawGame() {
         if (ball.fireball) {
             ballCol = '#ff7722';
             ballGlow = 1.0;
-        } else if (ball.curve !== 0) {
-            ballCol = '#bb77ff';
-            ballGlow = 0.7;
         }
         drawNeonCircle(ball.x, ball.y, ball.radius, ballCol, ballGlow);
 
         // Fireball trailing particles
         if (ball.fireball && Math.random() < 0.6) {
             spawnParticles(ball.x - ball.vx * 0.3, ball.y - ball.vy * 0.3, '#ff4400', 1, 2);
-        }
-        // Curve trailing particles
-        if (ball.curve !== 0 && Math.random() < 0.4) {
-            spawnParticles(ball.x, ball.y, '#8844ff', 1, 2);
         }
     }
 
@@ -1147,9 +1113,9 @@ function drawHUD() {
     ctx.font = Math.min(11, cw * 0.01) + 'px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#666688';
-    ctx.fillText('[SPACE] ' + (p1NextAbility === 'fireball' ? 'Fireball' : 'Curve'), cw * 0.15, ch - 30);
+    ctx.fillText('[SPACE] Fireball', cw * 0.15, ch - 30);
     if (!isVsAI) {
-        ctx.fillText('[ENTER] ' + (p2NextAbility === 'fireball' ? 'Fireball' : 'Curve'), cw * 0.85, ch - 30);
+        ctx.fillText('[ENTER] Fireball', cw * 0.85, ch - 30);
     }
 
     // Active effects indicators
@@ -1184,8 +1150,8 @@ function drawAbilityMeter(cx, y, w, charge, color, activeAbility, nextAbility) {
 
     // Labels
     if (activeAbility) {
-        var abLabel = activeAbility === 'fireball' ? 'FIREBALL READY!' : 'CURVE READY!';
-        var abColor = activeAbility === 'fireball' ? '#ff8800' : '#aa44ff';
+        var abLabel = 'FIREBALL READY!';
+        var abColor = '#ff8800';
         ctx.fillStyle = abColor;
         ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
         ctx.textAlign = 'center';
