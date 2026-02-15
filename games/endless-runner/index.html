@@ -1323,23 +1323,26 @@ function drawMenu() {
     ctx.fillStyle = '#444';
     ctx.fillRect(0, H - 80, W, 80);
 
+    // Layout: title area at top, play button in middle, controls panel below
+    const titleY = Math.min(H * 0.18, 120);
+
     // Title glow
     ctx.shadowColor = '#44aaff';
     ctx.shadowBlur = 30;
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 56px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('ENDLESS RUNNER', W / 2, H / 2 - 80);
+    ctx.fillText('ENDLESS RUNNER', W / 2, titleY);
     ctx.shadowBlur = 0;
 
     // Subtitle
     ctx.fillStyle = '#aaccff';
     ctx.font = '18px Arial';
-    ctx.fillText('Run. Jump. Slide. Survive.', W / 2, H / 2 - 45);
+    ctx.fillText('Run. Jump. Slide. Survive.', W / 2, titleY + 36);
 
     // Play button
     const bx = W / 2;
-    const by = H / 2 + 40;
+    const by = titleY + 100;
     ctx.fillStyle = '#44cc44';
     ctx.beginPath();
     roundRect(ctx, bx - 100, by - 28, 200, 56, 12);
@@ -1352,14 +1355,84 @@ function drawMenu() {
     if (highScore > 0) {
         ctx.fillStyle = '#ffdd00';
         ctx.font = '16px Arial';
-        ctx.fillText(`High Score: ${highScore}`, W / 2, H / 2 + 100);
+        ctx.fillText(`High Score: ${highScore}`, W / 2, by + 55);
     }
 
-    // Controls
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.font = '13px Arial';
-    ctx.fillText('SPACE / UP: Jump  |  DOWN / S: Slide  |  Double-tap SPACE: Double Jump', W / 2, H / 2 + 140);
-    ctx.fillText('On mobile: Tap upper half to jump, lower half to slide', W / 2, H / 2 + 160);
+    // ---- CONTROLS PANEL ----
+    const controlsData = [
+        { key: 'Space / Up', desc: 'Jump (hold for higher)' },
+        { key: 'Double tap', desc: 'Double jump' },
+        { key: 'Down / S',   desc: 'Slide' },
+        { key: 'P',          desc: 'Pause' },
+        { key: 'ESC',        desc: 'Main menu' }
+    ];
+
+    const lineHeight = 30;
+    const headingFont = 'bold 22px Arial';
+    const keyFont = 'bold 17px Arial';
+    const descFont = '17px Arial';
+    const panelPadTop = 18;
+    const panelPadBot = 16;
+    const headingHeight = 32;
+    const panelContentH = headingHeight + controlsData.length * lineHeight;
+    const panelH = panelPadTop + panelContentH + panelPadBot;
+    const panelW = 360;
+    const panelX = W / 2 - panelW / 2;
+    const panelY = by + (highScore > 0 ? 75 : 55);
+
+    // Semi-transparent dark panel background
+    ctx.fillStyle = 'rgba(10, 10, 30, 0.75)';
+    ctx.beginPath();
+    roundRect(ctx, panelX, panelY, panelW, panelH, 14);
+    ctx.fill();
+
+    // Panel border
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    roundRect(ctx, panelX, panelY, panelW, panelH, 14);
+    ctx.stroke();
+
+    // "CONTROLS" heading
+    const headingY = panelY + panelPadTop + 20;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = headingFont;
+    ctx.textAlign = 'center';
+    ctx.fillText('CONTROLS', W / 2, headingY);
+
+    // Thin separator line under heading
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 24, headingY + 10);
+    ctx.lineTo(panelX + panelW - 24, headingY + 10);
+    ctx.stroke();
+
+    // Control lines
+    const startY = headingY + 14 + lineHeight;
+    const keyColX = panelX + 28;             // left-aligned keys
+    const descColX = panelX + panelW / 2 + 16; // descriptions after middle
+    ctx.textAlign = 'left';
+
+    for (let i = 0; i < controlsData.length; i++) {
+        const y = startY + i * lineHeight;
+
+        // Key label in gold
+        ctx.fillStyle = '#FFD700';
+        ctx.font = keyFont;
+        ctx.fillText(controlsData[i].key, keyColX, y);
+
+        // Description in white
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = descFont;
+        ctx.fillText(controlsData[i].desc, descColX, y);
+    }
+
+    // Mobile hint below the panel
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(170, 200, 255, 0.6)';
+    ctx.font = '14px Arial';
+    ctx.fillText('Mobile: Tap top half to jump, bottom half to slide', W / 2, panelY + panelH + 22);
 
     // Jake's Arcade branding
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
