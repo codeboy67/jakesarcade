@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Pong Championship - Jake's Arcade</title>
@@ -108,6 +108,7 @@ function playGameWin() {
 function resize() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    if (typeof initTouchKeyboard === 'function') initTouchKeyboard();
 }
 window.addEventListener('resize', resize);
 resize();
@@ -136,8 +137,69 @@ var touchKeyboard = {
     startX: 0,
     startY: 0,
     rowPadding: 4,
-    keyPadding: 3
+    keyPadding: 3,
+    computedKeys: []  // array of {x, y, w, h, label} for each key
 };
+
+// Initialize touch keyboard dimensions and key positions based on canvas size
+function initTouchKeyboard() {
+    var kb = touchKeyboard;
+    var cw = canvas.width;
+    var ch = canvas.height;
+
+    // Key dimensions - at least 44px tall for touch targets
+    kb.keyWidth = Math.min(48, Math.floor((cw - 20) / 11));
+    kb.keyHeight = Math.max(44, Math.floor(ch * 0.055));
+    kb.rowPadding = 4;
+    kb.keyPadding = 3;
+
+    // Calculate total keyboard height to position it
+    var totalRows = kb.keys.length;
+    var totalKBHeight = totalRows * kb.keyHeight + (totalRows - 1) * kb.rowPadding;
+
+    // Position keyboard below the name entry input field
+    // The input box is at ch * 0.48 with height ~ch * 0.06, so start below that
+    kb.startY = ch * 0.56;
+    kb.startX = 0; // will center each row individually
+
+    // Build computedKeys array with {x, y, w, h, label} for each key
+    kb.computedKeys = [];
+    for (var row = 0; row < kb.keys.length; row++) {
+        var rowKeys = kb.keys[row];
+        var rowY = kb.startY + row * (kb.keyHeight + kb.rowPadding);
+
+        // Compute total width of this row
+        var totalRowWidth = 0;
+        for (var k = 0; k < rowKeys.length; k++) {
+            var keyLabel = rowKeys[k];
+            var kw = kb.keyWidth;
+            if (keyLabel === 'SPACE') kw = kb.keyWidth * 3 + kb.keyPadding * 2;
+            else if (keyLabel === 'DEL' || keyLabel === 'OK') kw = Math.floor(kb.keyWidth * 1.8);
+            totalRowWidth += kw + kb.keyPadding;
+        }
+        totalRowWidth -= kb.keyPadding; // remove trailing padding
+
+        // Center the row horizontally on the canvas
+        var rowX = Math.floor((cw - totalRowWidth) / 2);
+
+        for (var k = 0; k < rowKeys.length; k++) {
+            var keyLabel = rowKeys[k];
+            var kw = kb.keyWidth;
+            if (keyLabel === 'SPACE') kw = kb.keyWidth * 3 + kb.keyPadding * 2;
+            else if (keyLabel === 'DEL' || keyLabel === 'OK') kw = Math.floor(kb.keyWidth * 1.8);
+
+            kb.computedKeys.push({
+                x: rowX,
+                y: rowY,
+                w: kw,
+                h: kb.keyHeight,
+                label: keyLabel
+            });
+
+            rowX += kw + kb.keyPadding;
+        }
+    }
+}
 
 // --- Constants ---
 var PADDLE_WIDTH_RATIO = 0.015;
@@ -293,6 +355,10 @@ window.addEventListener('keydown', function(e) {
             if (isTopTenScore(matchWinnerScore)) {
                 nameEntryText = '';
                 nameEntryCursorBlink = 0;
+                if (isTouchDevice) {
+                    initTouchKeyboard();
+                    touchKeyboard.visible = true;
+                }
                 gameState = STATE.NAME_ENTRY;
             } else {
                 gameState = STATE.MENU;
@@ -303,6 +369,7 @@ window.addEventListener('keydown', function(e) {
         if (e.code === 'Enter') {
             var finalName = nameEntryText.trim() || 'PLAYER';
             addToLeaderboard(finalName, matchWinnerScore);
+            touchKeyboard.visible = false;
             gameState = STATE.MENU;
         } else if (e.code === 'Backspace') {
             nameEntryText = nameEntryText.slice(0, -1);
@@ -386,32 +453,11 @@ if (isTouchDevice) {
     // Helper: get keyboard key at touch position
     function getKeyboardKeyAt(tx, ty) {
         var kb = touchKeyboard;
-        if (!kb.visible) return null;
-        for (var row = 0; row < kb.keys.length; row++) {
-            var rowKeys = kb.keys[row];
-            var rowY = kb.startY + row * (kb.keyHeight + kb.rowPadding);
-            // Center the row
-            var totalRowWidth = 0;
-            for (var k = 0; k < rowKeys.length; k++) {
-                var keyLabel = rowKeys[k];
-                var kw = kb.keyWidth;
-                if (keyLabel === 'SPACE') kw = kb.keyWidth * 3 + kb.keyPadding * 2;
-                else if (keyLabel === 'DEL' || keyLabel === 'OK') kw = kb.keyWidth * 1.8;
-                totalRowWidth += kw + kb.keyPadding;
-            }
-            totalRowWidth -= kb.keyPadding;
-            var rowX = kb.startX + (canvas.width * 0.8 - totalRowWidth) / 2;
-
-            for (var k = 0; k < rowKeys.length; k++) {
-                var keyLabel = rowKeys[k];
-                var kw = kb.keyWidth;
-                if (keyLabel === 'SPACE') kw = kb.keyWidth * 3 + kb.keyPadding * 2;
-                else if (keyLabel === 'DEL' || keyLabel === 'OK') kw = kb.keyWidth * 1.8;
-
-                if (tx >= rowX && tx <= rowX + kw && ty >= rowY && ty <= rowY + kb.keyHeight) {
-                    return keyLabel;
-                }
-                rowX += kw + kb.keyPadding;
+        if (!kb.visible || !kb.computedKeys || kb.computedKeys.length === 0) return null;
+        for (var i = 0; i < kb.computedKeys.length; i++) {
+            var key = kb.computedKeys[i];
+            if (tx >= key.x && tx <= key.x + key.w && ty >= key.y && ty <= key.y + key.h) {
+                return key.label;
             }
         }
         return null;
@@ -463,6 +509,8 @@ if (isTouchDevice) {
                 if (isTopTenScore(matchWinnerScore)) {
                     nameEntryText = '';
                     nameEntryCursorBlink = 0;
+                    initTouchKeyboard();
+                    touchKeyboard.visible = true;
                     gameState = STATE.NAME_ENTRY;
                 } else {
                     gameState = STATE.MENU;
@@ -474,6 +522,7 @@ if (isTouchDevice) {
                     if (keyHit === 'OK') {
                         var finalName = nameEntryText.trim() || 'PLAYER';
                         addToLeaderboard(finalName, matchWinnerScore);
+                        touchKeyboard.visible = false;
                         gameState = STATE.MENU;
                     } else if (keyHit === 'DEL') {
                         nameEntryText = nameEntryText.slice(0, -1);
@@ -2022,15 +2071,79 @@ function drawNameEntry() {
     var alpha3 = 0.5 + Math.sin(Date.now() * 0.003) * 0.2;
     ctx.save();
     ctx.globalAlpha = alpha3;
-    drawNeonText('Type your name and press ENTER to confirm', cw / 2, ch * 0.62, Math.min(16, cw * 0.015), '#666699');
+    if (isTouchDevice) {
+        drawNeonText('Tap keys below to enter your name', cw / 2, ch * 0.535, Math.min(16, cw * 0.015), '#666699');
+    } else {
+        drawNeonText('Type your name and press ENTER to confirm', cw / 2, ch * 0.535, Math.min(16, cw * 0.015), '#666699');
+    }
     ctx.restore();
 
-    ctx.save();
-    ctx.fillStyle = '#444466';
-    ctx.font = Math.min(13, cw * 0.012) + 'px "Segoe UI", Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Max 12 characters  |  Letters, numbers, spaces', cw / 2, ch * 0.67);
-    ctx.restore();
+    // Draw virtual keyboard on touch devices
+    if (isTouchDevice && touchKeyboard.visible && touchKeyboard.computedKeys && touchKeyboard.computedKeys.length > 0) {
+        var kb = touchKeyboard;
+        for (var ki = 0; ki < kb.computedKeys.length; ki++) {
+            var key = kb.computedKeys[ki];
+
+            // Key background - dark semi-transparent
+            ctx.save();
+            ctx.fillStyle = 'rgba(20, 20, 50, 0.85)';
+            ctx.strokeStyle = 'rgba(100, 100, 200, 0.4)';
+            ctx.lineWidth = 1;
+
+            // Rounded key rectangle
+            var kr = 4;
+            ctx.beginPath();
+            ctx.moveTo(key.x + kr, key.y);
+            ctx.lineTo(key.x + key.w - kr, key.y);
+            ctx.arcTo(key.x + key.w, key.y, key.x + key.w, key.y + kr, kr);
+            ctx.lineTo(key.x + key.w, key.y + key.h - kr);
+            ctx.arcTo(key.x + key.w, key.y + key.h, key.x + key.w - kr, key.y + key.h, kr);
+            ctx.lineTo(key.x + kr, key.y + key.h);
+            ctx.arcTo(key.x, key.y + key.h, key.x, key.y + key.h - kr, kr);
+            ctx.lineTo(key.x, key.y + kr);
+            ctx.arcTo(key.x, key.y, key.x + kr, key.y, kr);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+
+            // Key label - white text
+            var labelSize = Math.min(16, Math.floor(key.h * 0.38));
+            if (key.label === 'SPACE' || key.label === 'DEL' || key.label === 'OK') {
+                labelSize = Math.min(14, Math.floor(key.h * 0.32));
+            }
+            ctx.save();
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold ' + labelSize + 'px "Segoe UI", Arial, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // Special key label colors
+            if (key.label === 'OK') {
+                ctx.fillStyle = '#44ff88';
+            } else if (key.label === 'DEL') {
+                ctx.fillStyle = '#ff6666';
+            } else if (key.label === 'SPACE') {
+                ctx.fillStyle = '#aaaacc';
+            }
+
+            var displayLabel = key.label;
+            if (key.label === 'SPACE') displayLabel = 'SPACE';
+
+            ctx.fillText(displayLabel, key.x + key.w / 2, key.y + key.h / 2);
+            ctx.restore();
+        }
+    }
+
+    // Max characters hint at the bottom
+    if (!isTouchDevice) {
+        ctx.save();
+        ctx.fillStyle = '#444466';
+        ctx.font = Math.min(13, cw * 0.012) + 'px "Segoe UI", Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Max 12 characters  |  Letters, numbers, spaces', cw / 2, ch * 0.67);
+        ctx.restore();
+    }
 }
 
 function drawPaused() {

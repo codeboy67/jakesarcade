@@ -590,7 +590,7 @@ canvas.addEventListener('touchstart', e => {
             mouse.clicked = true;
         }
     }
-});
+}, { passive: false });
 
 canvas.addEventListener('touchmove', e => {
     e.preventDefault();
@@ -625,7 +625,7 @@ canvas.addEventListener('touchmove', e => {
             }
         }
     }
-});
+}, { passive: false });
 
 canvas.addEventListener('touchend', e => {
     e.preventDefault();
@@ -666,7 +666,7 @@ canvas.addEventListener('touchend', e => {
             mouse.down = false;
         }
     }
-});
+}, { passive: false });
 
 canvas.addEventListener('touchcancel', e => {
     e.preventDefault();
@@ -695,7 +695,7 @@ canvas.addEventListener('touchcancel', e => {
     if (Object.keys(activeTouches).length === 0) {
         mouse.down = false;
     }
-});
+}, { passive: false });
 
 function updateJoystickKeys() {
     const jdx = joystick.thumbX - joystick.baseX;

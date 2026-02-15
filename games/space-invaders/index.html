@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Space Invaders Remix - Jake's Arcade</title>
@@ -18,6 +18,7 @@ canvas {
     display: block;
     position: fixed;
     top: 0; left: 0;
+    touch-action: none;
 }
 #backLink {
     position: fixed;
@@ -49,6 +50,7 @@ const backLink = document.getElementById('backLink');
 function resize() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    if (typeof initVirtualKeyboard === 'function') initVirtualKeyboard();
 }
 resize();
 window.addEventListener('resize', resize);
@@ -78,6 +80,7 @@ let lives = 3;
 let nameEntryText = '';
 let nameEntryCursorBlink = 0;
 const MAX_NAME_LENGTH = 12;
+let virtualKeyboardKeys = []; // Array of {x, y, w, h, label}
 
 function getLeaderboard() {
     try {
@@ -109,6 +112,60 @@ function addToLeaderboard(name, s) {
         localStorage.setItem('spaceInvadersHighScore', highScore);
     }
 }
+function initVirtualKeyboard() {
+    virtualKeyboardKeys = [];
+    const rows = [
+        ['Q','W','E','R','T','Y','U','I','O','P'],
+        ['A','S','D','F','G','H','J','K','L'],
+        ['Z','X','C','V','B','N','M'],
+        ['1','2','3','4','5','6','7','8','9','0'],
+        ['SPACE','BKSP','ENTER']
+    ];
+    const keyW = Math.min(48, Math.floor((canvas.width - 20) / 11));
+    const keyH = Math.max(44, keyW);
+    const gap = 4;
+    const cx = canvas.width / 2;
+    // Position keyboard below the name input box area
+    // The input box is at roughly cy + 40 (boxY + boxH), plus instruction text
+    // Start keyboard at cy + 100
+    const cy = canvas.height / 2;
+    let startY = cy + 100;
+    for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
+        let totalW;
+        if (r === 4) {
+            // Bottom row: SPACE(3 keys+2gaps) + gap + BKSP(2 keys+gap) + gap + ENTER(2 keys+gap)
+            totalW = (3 * keyW + 2 * gap) + gap + (2 * keyW + gap) + gap + (2 * keyW + gap);
+        } else {
+            totalW = row.length * keyW + (row.length - 1) * gap;
+        }
+        let sx = cx - totalW / 2;
+        const y = startY + r * (keyH + gap);
+        if (r === 4) {
+            // Special bottom row
+            const spaceW = 3 * keyW + 2 * gap;
+            const bkspW = 2 * keyW + gap;
+            const enterW = 2 * keyW + gap;
+            virtualKeyboardKeys.push({ x: sx, y: y, w: spaceW, h: keyH, label: 'SPACE' });
+            sx += spaceW + gap;
+            virtualKeyboardKeys.push({ x: sx, y: y, w: bkspW, h: keyH, label: 'BKSP' });
+            sx += bkspW + gap;
+            virtualKeyboardKeys.push({ x: sx, y: y, w: enterW, h: keyH, label: 'ENTER' });
+        } else {
+            for (let c = 0; c < row.length; c++) {
+                virtualKeyboardKeys.push({
+                    x: sx + c * (keyW + gap),
+                    y: y,
+                    w: keyW,
+                    h: keyH,
+                    label: row[c]
+                });
+            }
+        }
+    }
+}
+initVirtualKeyboard();
+
 let wave = 1;
 let combo = 0;
 let comboMultiplier = 1;
@@ -287,11 +344,31 @@ function handleTouchStartActions(e) {
             startGame();
         }
 
-        // Name Entry: tap to submit with default name
+        // Name Entry: handle virtual keyboard taps
         if (state === 'nameEntry') {
-            const finalName = nameEntryText.trim() || 'PLAYER';
-            addToLeaderboard(finalName, score);
-            state = 'gameover';
+            let keyHit = false;
+            for (const key of virtualKeyboardKeys) {
+                if (tx >= key.x && tx <= key.x + key.w && ty >= key.y && ty <= key.y + key.h) {
+                    keyHit = true;
+                    if (key.label === 'ENTER') {
+                        const finalName = nameEntryText.trim() || 'PLAYER';
+                        addToLeaderboard(finalName, score);
+                        state = 'gameover';
+                    } else if (key.label === 'BKSP') {
+                        nameEntryText = nameEntryText.slice(0, -1);
+                    } else if (key.label === 'SPACE') {
+                        if (nameEntryText.length < MAX_NAME_LENGTH) {
+                            nameEntryText += ' ';
+                        }
+                    } else {
+                        if (nameEntryText.length < MAX_NAME_LENGTH) {
+                            nameEntryText += key.label;
+                        }
+                    }
+                    break;
+                }
+            }
+            // Taps outside the keyboard do nothing
         }
 
         // Pause menu buttons
@@ -2098,11 +2175,40 @@ function drawNameEntry() {
     ctx.fillStyle = '#888';
     ctx.font = '16px Courier New';
     ctx.textAlign = 'center';
-    ctx.fillText('Type your name and press ENTER to confirm', cx, boxY + boxH + 35);
+    if (isTouchDevice) {
+        ctx.fillText('Tap keys below to enter your name', cx, boxY + boxH + 35);
+    } else {
+        ctx.fillText('Type your name and press ENTER to confirm', cx, boxY + boxH + 35);
+    }
 
     ctx.fillStyle = '#555';
     ctx.font = '14px Courier New';
     ctx.fillText(`(${MAX_NAME_LENGTH} chars max | Default: PLAYER)`, cx, boxY + boxH + 58);
+
+    // Draw virtual keyboard for touch devices
+    if (isTouchDevice && virtualKeyboardKeys.length > 0) {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (const key of virtualKeyboardKeys) {
+            // Key background
+            ctx.fillStyle = 'rgba(20,30,50,0.85)';
+            ctx.fillRect(key.x, key.y, key.w, key.h);
+            // Key border
+            ctx.strokeStyle = 'rgba(0,255,255,0.5)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(key.x, key.y, key.w, key.h);
+            // Key label
+            ctx.fillStyle = '#fff';
+            if (key.label === 'ENTER') {
+                ctx.font = 'bold 13px Courier New';
+            } else if (key.label === 'BKSP' || key.label === 'SPACE') {
+                ctx.font = 'bold 14px Courier New';
+            } else {
+                ctx.font = 'bold 18px Courier New';
+            }
+            ctx.fillText(key.label, key.x + key.w / 2, key.y + key.h / 2);
+        }
+    }
 
     ctx.restore();
 }

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Tank Wars - Jake's Arcade</title>
@@ -19,6 +19,7 @@ canvas {
     display: block;
     width: 100vw;
     height: 100vh;
+    touch-action: none;
 }
 #backLink {
     position: fixed;
@@ -237,6 +238,64 @@ let nameEntryCursorBlink = 0;
 let nameEntryWinnerIndex = -1;
 const LEADERBOARD_KEY = 'tankWarsLeaderboard';
 
+// ---- VIRTUAL KEYBOARD STATE (for touch name entry) ----
+let virtualKeyboardReady = false;
+let virtualKeys = [];
+const VKBD_ROWS = [
+    ['Q','W','E','R','T','Y','U','I','O','P'],
+    ['A','S','D','F','G','H','J','K','L'],
+    ['BKSP','Z','X','C','V','B','N','M','ENTER'],
+    ['SPACE']
+];
+
+function initVirtualKeyboard() {
+    virtualKeys = [];
+    const kbdW = Math.min(W - 20, 520);
+    const keyH = Math.max(44, Math.floor(H * 0.065));
+    const keyGap = 4;
+    const kbdTotalH = VKBD_ROWS.length * (keyH + keyGap);
+    const kbdStartY = H - kbdTotalH - 12;
+    const kbdStartX = (W - kbdW) / 2;
+
+    for (let r = 0; r < VKBD_ROWS.length; r++) {
+        const row = VKBD_ROWS[r];
+        const y = kbdStartY + r * (keyH + keyGap);
+
+        if (row.length === 1 && row[0] === 'SPACE') {
+            // Space bar spans ~60% of keyboard width, centered
+            const spaceW = kbdW * 0.6;
+            const spaceX = kbdStartX + (kbdW - spaceW) / 2;
+            virtualKeys.push({ x: spaceX, y: y, w: spaceW, h: keyH, label: 'SPACE', action: 'SPACE' });
+            continue;
+        }
+
+        // Calculate key widths: special keys get more space
+        let specialCount = 0;
+        let normalCount = 0;
+        for (const k of row) {
+            if (k === 'BKSP' || k === 'ENTER') specialCount++;
+            else normalCount++;
+        }
+        const specialW = kbdW * 0.15; // Each special key gets 15% width
+        const remainW = kbdW - specialCount * (specialW + keyGap) - (normalCount - 1) * keyGap;
+        const normalW = remainW / normalCount;
+
+        let cx = kbdStartX;
+        // Center the row if it has fewer keys (like the middle row)
+        const totalRowW = normalCount * normalW + specialCount * specialW + (row.length - 1) * keyGap;
+        if (totalRowW < kbdW) {
+            cx = kbdStartX + (kbdW - totalRowW) / 2;
+        }
+
+        for (const k of row) {
+            const isSpecial = (k === 'BKSP' || k === 'ENTER');
+            const kw = isSpecial ? specialW : normalW;
+            virtualKeys.push({ x: cx, y: y, w: kw, h: keyH, label: k, action: k });
+            cx += kw + keyGap;
+        }
+    }
+}
+
 function getLeaderboard() {
     try {
         const data = JSON.parse(localStorage.getItem(LEADERBOARD_KEY));
@@ -297,6 +356,7 @@ function resize() {
     H = window.innerHeight;
     canvas.width = W;
     canvas.height = H;
+    if (virtualKeyboardReady) initVirtualKeyboard();
 }
 window.addEventListener('resize', resize);
 resize();
@@ -1743,33 +1803,36 @@ function drawNameEntry() {
     ctx.textAlign = 'center';
     const winner = roundScores[0] >= ROUNDS_TO_WIN ? tanks[0] : tanks[1];
 
+    // On touch devices, push content up to make room for the virtual keyboard
+    const touchOffset = isTouchDevice ? -0.1 : 0;
+
     // Victory header
     ctx.fillStyle = winner.color;
     ctx.font = 'bold 42px "Segoe UI", Arial';
-    ctx.fillText(`${winner.name} WINS!`, W / 2, H * 0.2);
+    ctx.fillText(`${winner.name} WINS!`, W / 2, H * (0.2 + touchOffset));
 
     ctx.fillStyle = '#fff';
     ctx.font = '24px "Segoe UI", Arial';
-    ctx.fillText(`Final Score: ${roundScores[0]} - ${roundScores[1]}`, W / 2, H * 0.28);
+    ctx.fillText(`Final Score: ${roundScores[0]} - ${roundScores[1]}`, W / 2, H * (0.28 + touchOffset));
 
     // NEW HIGH SCORE notification
     ctx.fillStyle = '#FFD700';
     ctx.font = 'bold 28px "Segoe UI", Arial';
     const pulse = Math.sin(Date.now() * 0.005) * 0.15 + 0.85;
     ctx.globalAlpha = pulse;
-    ctx.fillText('NEW HIGH SCORE!', W / 2, H * 0.38);
+    ctx.fillText('NEW HIGH SCORE!', W / 2, H * (0.34 + touchOffset));
     ctx.globalAlpha = 1;
 
     // Name entry prompt
     ctx.fillStyle = '#ccc';
     ctx.font = '20px "Segoe UI", Arial';
-    ctx.fillText('ENTER YOUR NAME:', W / 2, H * 0.46);
+    ctx.fillText('ENTER YOUR NAME:', W / 2, H * (0.40 + touchOffset));
 
     // Name entry box
     const boxW = 320;
     const boxH = 50;
     const boxX = W / 2 - boxW / 2;
-    const boxY = H * 0.49;
+    const boxY = H * (0.43 + touchOffset);
 
     ctx.fillStyle = 'rgba(0,0,0,0.8)';
     ctx.fillRect(boxX, boxY, boxW, boxH);
@@ -1793,11 +1856,68 @@ function drawNameEntry() {
         ctx.fillRect(cursorX, boxY + 10, 2, 30);
     }
 
-    // Instructions
-    ctx.fillStyle = '#888';
-    ctx.font = '14px "Segoe UI", Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('Type your name (max 12 chars) | Enter to confirm | ESC to skip', W / 2, boxY + boxH + 25);
+    // Instructions / Virtual Keyboard
+    if (isTouchDevice) {
+        drawVirtualKeyboard();
+    } else {
+        ctx.fillStyle = '#888';
+        ctx.font = '14px "Segoe UI", Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('Type your name (max 12 chars) | Enter to confirm | ESC to skip', W / 2, boxY + boxH + 25);
+    }
+}
+
+function drawVirtualKeyboard() {
+    ctx.save();
+    for (const key of virtualKeys) {
+        const isSpecial = (key.action === 'ENTER' || key.action === 'BKSP' || key.action === 'SPACE');
+
+        // Key background
+        if (key.action === 'ENTER') {
+            ctx.fillStyle = 'rgba(40, 160, 60, 0.75)';
+        } else if (key.action === 'BKSP') {
+            ctx.fillStyle = 'rgba(180, 50, 40, 0.7)';
+        } else {
+            ctx.fillStyle = 'rgba(60, 60, 70, 0.8)';
+        }
+
+        // Rounded rectangle
+        const r = 6;
+        ctx.beginPath();
+        ctx.moveTo(key.x + r, key.y);
+        ctx.lineTo(key.x + key.w - r, key.y);
+        ctx.quadraticCurveTo(key.x + key.w, key.y, key.x + key.w, key.y + r);
+        ctx.lineTo(key.x + key.w, key.y + key.h - r);
+        ctx.quadraticCurveTo(key.x + key.w, key.y + key.h, key.x + key.w - r, key.y + key.h);
+        ctx.lineTo(key.x + r, key.y + key.h);
+        ctx.quadraticCurveTo(key.x, key.y + key.h, key.x, key.y + key.h - r);
+        ctx.lineTo(key.x, key.y + r);
+        ctx.quadraticCurveTo(key.x, key.y, key.x + r, key.y);
+        ctx.closePath();
+        ctx.fill();
+
+        // Key border
+        ctx.strokeStyle = key.action === 'ENTER' ? 'rgba(100, 220, 120, 0.6)' :
+                          key.action === 'BKSP' ? 'rgba(230, 100, 90, 0.5)' :
+                          'rgba(140, 140, 150, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Key label
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = isSpecial ? 'bold 14px "Segoe UI", Arial' : '18px "Segoe UI", Arial';
+
+        let label = key.label;
+        if (key.action === 'BKSP') label = '\u232B';
+        if (key.action === 'SPACE') label = '[ SPACE ]';
+        if (key.action === 'ENTER') label = 'ENTER';
+
+        ctx.fillText(label, key.x + key.w / 2, key.y + key.h / 2);
+    }
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
 }
 
 function drawLeaderboard(x, y, maxEntries, title) {
@@ -2420,14 +2540,34 @@ function handlePauseTouch(tx, ty) {
 }
 
 function handleNameEntryTouch(tx, ty) {
-    // For name entry on touch, show a prompt-based input since there is no
-    // on-screen keyboard we can control. We use a native prompt fallback.
-    const result = prompt('Enter your name (max 12 chars):', nameEntryText || 'PLAYER');
-    if (result !== null) {
-        nameEntryText = result.replace(/[^A-Za-z0-9 _\-]/g, '').slice(0, 12).toUpperCase();
-        const finalName = nameEntryText.trim() || 'PLAYER';
-        addToLeaderboard(finalName, roundScores[nameEntryWinnerIndex]);
-        gameState = 'matchEnd';
+    // Handle taps on the virtual keyboard keys
+    for (const key of virtualKeys) {
+        if (tx >= key.x && tx <= key.x + key.w && ty >= key.y && ty <= key.y + key.h) {
+            if (key.action === 'ENTER') {
+                // Submit the name
+                const finalName = nameEntryText.trim() || 'PLAYER';
+                addToLeaderboard(finalName, roundScores[nameEntryWinnerIndex]);
+                gameState = 'matchEnd';
+                playSound('select');
+            } else if (key.action === 'BKSP') {
+                // Delete last character
+                nameEntryText = nameEntryText.slice(0, -1);
+                playSound('select');
+            } else if (key.action === 'SPACE') {
+                // Add space if under limit
+                if (nameEntryText.length < 12) {
+                    nameEntryText += ' ';
+                    playSound('select');
+                }
+            } else {
+                // Append letter if under limit
+                if (nameEntryText.length < 12) {
+                    nameEntryText += key.label;
+                    playSound('select');
+                }
+            }
+            return;
+        }
     }
 }
 
@@ -2534,7 +2674,11 @@ function drawTouchControls() {
 }
 
 // ---- START ----
-if (isTouchDevice) buildTouchButtonDefs();
+if (isTouchDevice) {
+    buildTouchButtonDefs();
+    initVirtualKeyboard();
+    virtualKeyboardReady = true;
+}
 gameLoop();
 </script>
 </body>

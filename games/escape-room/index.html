@@ -60,6 +60,84 @@ let menuBtnHover='';
 let paused=false;
 let stateBeforePause='';
 
+// Code entry overlay (replaces prompt() for mobile support)
+let codeEntry={active:false,title:'',maxDigits:0,text:'',callback:null};
+function showCodeEntry(title,maxDigits,callback){
+codeEntry={active:true,title:title,maxDigits:maxDigits,text:'',callback:callback};
+}
+function closeCodeEntry(){codeEntry={active:false,title:'',maxDigits:0,text:'',callback:null};}
+function getCodeEntryLayout(){
+// Numeric keypad: 3x4 grid (1-9, CLEAR, 0, ENTER)
+const padW=Math.min(300,W*0.7);
+const btnSize=Math.max(60,padW/3-8);
+const gap=8;
+const totalW=btnSize*3+gap*2;
+const totalH=btnSize*4+gap*3;
+const startX=W/2-totalW/2;
+const startY=H/2+10;
+const keys=['1','2','3','4','5','6','7','8','9','CLEAR','0','ENTER'];
+const layout=[];
+for(let i=0;i<12;i++){
+const col=i%3,row=Math.floor(i/3);
+layout.push({key:keys[i],x:startX+col*(btnSize+gap),y:startY+row*(btnSize+gap),w:btnSize,h:btnSize});
+}
+// Cancel button
+const cancelW=totalW,cancelH=40;
+const cancelX=W/2-cancelW/2,cancelY=startY+totalH+12;
+layout.push({key:'CANCEL',x:cancelX,y:cancelY,w:cancelW,h:cancelH});
+return layout;
+}
+function drawCodeEntry(){
+// Semi-transparent overlay
+ctx.fillStyle='rgba(0,0,0,0.8)';
+ctx.fillRect(0,0,W,H);
+// Title
+const titleSize=Math.min(22,W*0.04);
+ctx.fillStyle='#FFD700';ctx.font=`bold ${titleSize}px 'Segoe UI', Arial`;
+ctx.textAlign='center';
+ctx.fillText(codeEntry.title,W/2,H/2-120);
+// Display entered digits
+const displaySize=Math.min(36,W*0.06);
+ctx.fillStyle='#111';
+const dispW=Math.min(260,W*0.5),dispH=50;
+const dispX=W/2-dispW/2,dispY=H/2-90;
+ctx.fillRect(dispX,dispY,dispW,dispH);
+ctx.strokeStyle='#4a6a9e';ctx.lineWidth=2;ctx.strokeRect(dispX,dispY,dispW,dispH);
+ctx.fillStyle='#0f0';ctx.font=`bold ${displaySize}px monospace`;
+const displayText=codeEntry.text+'_'.repeat(Math.max(0,codeEntry.maxDigits-codeEntry.text.length));
+ctx.fillText(displayText,W/2,dispY+dispH/2+displaySize*0.35);
+// Keypad
+const layout=getCodeEntryLayout();
+for(let i=0;i<layout.length;i++){
+const k=layout[i];
+const isHover=mouseX>k.x&&mouseX<k.x+k.w&&mouseY>k.y&&mouseY<k.y+k.h;
+if(k.key==='ENTER'){
+ctx.fillStyle=isHover?'#3a8':'#296';
+}else if(k.key==='CLEAR'){
+ctx.fillStyle=isHover?'#c63':'#a42';
+}else if(k.key==='CANCEL'){
+ctx.fillStyle=isHover?'#666':'#444';
+}else{
+ctx.fillStyle=isHover?'rgba(80,100,160,0.95)':'rgba(30,40,70,0.9)';
+}
+// Rounded rect
+const r=8;
+ctx.beginPath();
+ctx.moveTo(k.x+r,k.y);ctx.lineTo(k.x+k.w-r,k.y);ctx.quadraticCurveTo(k.x+k.w,k.y,k.x+k.w,k.y+r);
+ctx.lineTo(k.x+k.w,k.y+k.h-r);ctx.quadraticCurveTo(k.x+k.w,k.y+k.h,k.x+k.w-r,k.y+k.h);
+ctx.lineTo(k.x+r,k.y+k.h);ctx.quadraticCurveTo(k.x,k.y+k.h,k.x,k.y+k.h-r);
+ctx.lineTo(k.x,k.y+r);ctx.quadraticCurveTo(k.x,k.y,k.x+r,k.y);
+ctx.closePath();ctx.fill();
+ctx.strokeStyle=isHover?'#8af':'#4a6a9e';ctx.lineWidth=2;ctx.stroke();
+// Label
+ctx.fillStyle='#fff';
+const fontSize=k.key==='CANCEL'?Math.min(16,k.h*0.4):Math.min(24,k.h*0.4);
+ctx.font=`bold ${fontSize}px 'Segoe UI', Arial`;
+ctx.fillText(k.key,k.x+k.w/2,k.y+k.h/2+fontSize*0.35);
+}
+ctx.textAlign='left';
+}
+
 // Leaderboard
 let leaderboard=(function(){try{return JSON.parse(localStorage.getItem('escapeRoomLeaderboard')||'[]');}catch(e){return [];}})();
 let nameEntryText='';
@@ -147,6 +225,20 @@ e.preventDefault();
 
 // Keyboard
 window.addEventListener('keydown',e=>{
+// Code entry overlay captures keys
+if(codeEntry.active){
+e.preventDefault();
+if(e.key==='Enter'){
+if(codeEntry.text.length>0&&codeEntry.callback){const cb=codeEntry.callback;const txt=codeEntry.text;closeCodeEntry();cb(txt);}
+return;
+}
+if(e.key==='Backspace'||e.key==='Delete'){codeEntry.text='';return;}
+if(e.key==='Escape'){closeCodeEntry();return;}
+if(/^[0-9]$/.test(e.key)&&codeEntry.text.length<codeEntry.maxDigits){
+codeEntry.text+=e.key;sfxClick();
+}
+return;
+}
 // Name entry mode captures all keys
 if(state==='nameEntry'){
 e.preventDefault();
@@ -347,9 +439,10 @@ const px=W*0.08,py=H*0.12,pw=W*0.12,ph=H*0.18;
 const dx=W*0.88,dy=H*0.3,dw=W*0.08,dh=H*0.35;
 // Board
 if(!d.boardSolved&&x>wbx&&x<wbx+wbw&&y>wby&&y<wby+wbh){
-const ans=prompt('Solve: 3 x 9 - 20 = ?');
+showCodeEntry('Solve: 3 x 9 - 20 = ?',2,function(ans){
 if(ans&&parseInt(ans)===7){d.boardSolved=true;sfxCorrect();showMessage('First digit is 7!');}
 else{sfxWrong();showMessage('Wrong answer! Try again.');}
+});
 return;
 }
 // Teacher desk drawer
@@ -370,9 +463,10 @@ return;
 // Door
 if(x>dx&&x<dx+dw&&y>dy&&y<dy+dh){
 if(d.doorUnlocked){sfxDoor();completeRoom();return;}
-const code=prompt('Enter 3-digit code:');
+showCodeEntry('Enter 3-digit code:',3,function(code){
 if(code==='727'){d.doorUnlocked=true;sfxUnlock();showMessage('Door unlocked! Click to escape!');}
 else{sfxWrong();showMessage('Wrong code!');}
+});
 return;
 }
 }
@@ -543,9 +637,10 @@ const sx=W*0.72,sy=H*0.5,sw=W*0.15,sh=H*0.18;
 if(x>sx&&x<sx+sw&&y>sy&&y<sy+sh){
 if(d.safeOpen){showMessage('Safe is already open!');return;}
 if(!d.mixed){showMessage('Complete the chemical experiment first!');return;}
-const code=prompt('Enter safe code (3 digits):');
+showCodeEntry('Enter safe code (3 digits):',3,function(code){
 if(code==='395'){d.safeOpen=true;sfxUnlock();showMessage('Safe opened! You found the exit key!');}
 else{sfxWrong();showMessage('Wrong code!');}
+});
 return;
 }
 // Door
@@ -742,9 +837,10 @@ const chx=W*0.78,chy=H*0.5,chw=W*0.15,chh=H*0.14;
 if(x>chx&&x<chx+chw&&y>chy&&y<chy+chh+16){
 if(!d.noteAssembled){showMessage('The chest needs a 4-digit code. Find all note pieces first!');return;}
 if(d.chestOpen){showMessage('Already open!');return;}
-const code=prompt('Enter the 4-digit code:');
+showCodeEntry('Enter the 4-digit code:',4,function(code){
 if(code==='1863'){d.chestOpen=true;sfxUnlock();showMessage('Chest opened! A hidden door is revealed!');}
 else{sfxWrong();showMessage('Wrong code!');}
+});
 return;
 }
 // Exit door
@@ -1700,6 +1796,27 @@ ctx.textAlign='left';
 
 // ============ CLICK HANDLER ============
 function handleClick(x,y){
+// Code entry overlay
+if(codeEntry.active){
+const layout=getCodeEntryLayout();
+for(let i=0;i<layout.length;i++){
+const k=layout[i];
+if(x>k.x&&x<k.x+k.w&&y>k.y&&y<k.y+k.h){
+sfxClick();
+if(k.key==='ENTER'){
+if(codeEntry.text.length>0&&codeEntry.callback){const cb=codeEntry.callback;const txt=codeEntry.text;closeCodeEntry();cb(txt);}
+}else if(k.key==='CLEAR'){
+codeEntry.text='';
+}else if(k.key==='CANCEL'){
+closeCodeEntry();
+}else{
+if(codeEntry.text.length<codeEntry.maxDigits){codeEntry.text+=k.key;}
+}
+return;
+}
+}
+return; // Clicks outside buttons do nothing while overlay is active
+}
 if(paused){
 const btnW=260,btnH=50;
 const resumeX=W/2-btnW/2,resumeY=H*0.45;
@@ -1860,6 +1977,8 @@ backLink.style.display='none';
 drawRoomComplete();
 cursorStyle='pointer';
 }
+// Code entry overlay
+if(codeEntry.active){drawCodeEntry();cursorStyle='pointer';}
 // Pause overlay
 if(paused){
 ctx.fillStyle='rgba(0,0,0,0.7)';

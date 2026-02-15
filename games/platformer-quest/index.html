@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Platformer Quest - Jake's Arcade</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; }
-canvas { display: block; }
+canvas { display: block; touch-action: none; }
 #backLink {
     position: fixed; top: 12px; left: 12px; z-index: 100;
     color: #aaa; font-size: 13px; text-decoration: none;
@@ -34,6 +34,7 @@ const backLink = document.getElementById('backLink');
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    if (typeof initVirtualKeyboard === 'function') initVirtualKeyboard();
 }
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
@@ -143,6 +144,52 @@ let nameEntryText = '';
 let nameEntryCallback = null;
 let nameEntryScore = 0;
 let nameEntryReturnState = 'gameOver'; // where to go after name entry
+
+// Virtual keyboard for touch name entry
+let virtualKeyboard = [];
+function initVirtualKeyboard() {
+    virtualKeyboard = [];
+    const rows = [
+        ['Q','W','E','R','T','Y','U','I','O','P'],
+        ['A','S','D','F','G','H','J','K','L'],
+        ['Z','X','C','V','B','N','M'],
+        ['1','2','3','4','5','6','7','8','9','0'],
+        ['SPACE','BKSP','ENTER']
+    ];
+    const kbWidth = Math.min(canvas.width - 20, 500);
+    const keyH = 44;
+    const gap = 4;
+    const startY = canvas.height * 0.47 + 50 + 30; // below the name input box + some margin
+    // Standard key width based on widest row (10 keys)
+    const maxCols = 10;
+    const stdKeyW = (kbWidth - gap * (maxCols - 1)) / maxCols;
+
+    for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
+        const isSpecialRow = (r === 4);
+        let keyW;
+        if (isSpecialRow) {
+            // SPACE BKSP ENTER row - divide full width evenly
+            keyW = (kbWidth - gap * (row.length - 1)) / row.length;
+        } else {
+            keyW = stdKeyW;
+        }
+        // Center each row
+        const totalRowW = keyW * row.length + gap * (row.length - 1);
+        const rowStartX = (canvas.width - totalRowW) / 2;
+
+        for (let c = 0; c < row.length; c++) {
+            virtualKeyboard.push({
+                x: rowStartX + c * (keyW + gap),
+                y: startY + r * (keyH + gap),
+                w: keyW,
+                h: keyH,
+                label: row[c]
+            });
+        }
+    }
+}
+initVirtualKeyboard();
 
 // World themes
 const WORLD_THEMES = [
@@ -290,6 +337,27 @@ if (isTouchDevice) {
                     } else {
                         activeTouches[touch.identifier] = btn;
                         syncTouchState();
+                    }
+                }
+            } else if (nameEntryActive && isTouchDevice) {
+                // Virtual keyboard hit testing
+                for (let k = 0; k < virtualKeyboard.length; k++) {
+                    const key = virtualKeyboard[k];
+                    if (tx >= key.x && tx <= key.x + key.w && ty >= key.y && ty <= key.y + key.h) {
+                        if (key.label === 'ENTER') {
+                            confirmNameEntry();
+                        } else if (key.label === 'BKSP') {
+                            nameEntryText = nameEntryText.slice(0, -1);
+                        } else if (key.label === 'SPACE') {
+                            if (nameEntryText.length < 10) {
+                                nameEntryText += ' ';
+                            }
+                        } else {
+                            if (nameEntryText.length < 10) {
+                                nameEntryText += key.label;
+                            }
+                        }
+                        break;
                     }
                 }
             } else {
@@ -2902,8 +2970,40 @@ function drawNameEntry() {
     // Instructions
     ctx.fillStyle = '#aaa';
     ctx.font = '16px Arial';
-    ctx.fillText('Type your name (max 10 chars) and press ENTER', canvas.width / 2, boxY + boxH + 30);
-    ctx.fillText('Press ENTER without typing to use "PLAYER"', canvas.width / 2, boxY + boxH + 55);
+    if (isTouchDevice) {
+        ctx.fillText('Tap keys below (max 10 chars)', canvas.width / 2, boxY + boxH + 20);
+
+        // Draw virtual keyboard
+        for (let k = 0; k < virtualKeyboard.length; k++) {
+            const key = virtualKeyboard[k];
+            // Key background
+            ctx.fillStyle = 'rgba(40, 40, 70, 0.85)';
+            roundRect(key.x, key.y, key.w, key.h, 6);
+            // Key border
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(key.x + 6, key.y);
+            ctx.lineTo(key.x + key.w - 6, key.y);
+            ctx.quadraticCurveTo(key.x + key.w, key.y, key.x + key.w, key.y + 6);
+            ctx.lineTo(key.x + key.w, key.y + key.h - 6);
+            ctx.quadraticCurveTo(key.x + key.w, key.y + key.h, key.x + key.w - 6, key.y + key.h);
+            ctx.lineTo(key.x + 6, key.y + key.h);
+            ctx.quadraticCurveTo(key.x, key.y + key.h, key.x, key.y + key.h - 6);
+            ctx.lineTo(key.x, key.y + 6);
+            ctx.quadraticCurveTo(key.x, key.y, key.x + 6, key.y);
+            ctx.closePath();
+            ctx.stroke();
+            // Key label
+            ctx.fillStyle = '#fff';
+            const fontSize = (key.label.length > 1) ? 13 : 16;
+            ctx.font = 'bold ' + fontSize + 'px Arial';
+            ctx.fillText(key.label, key.x + key.w / 2, key.y + key.h / 2 + fontSize * 0.35);
+        }
+    } else {
+        ctx.fillText('Type your name (max 10 chars) and press ENTER', canvas.width / 2, boxY + boxH + 30);
+        ctx.fillText('Press ENTER without typing to use "PLAYER"', canvas.width / 2, boxY + boxH + 55);
+    }
 
     ctx.textAlign = 'left';
 }
