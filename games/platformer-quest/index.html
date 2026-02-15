@@ -91,7 +91,7 @@ const DASH_DURATION = 8;
 const DASH_COOLDOWN = 45;
 const INVINCIBILITY_TIME = 90;
 
-let gameState = 'menu'; // menu, levelSelect, playing, paused, levelComplete, gameOver, bossIntro, worldComplete
+let gameState = 'menu'; // menu, levelSelect, playing, paused, levelComplete, gameOver, bossIntro, worldComplete (nameEntryActive overlay)
 let currentWorld = 0;
 let currentLevel = 0;
 let lives = 3;
@@ -125,6 +125,11 @@ let transitionCallback = null;
 let shakeTimer = 0;
 let shakeIntensity = 0;
 let stateBeforePause = null;
+let nameEntryActive = false;
+let nameEntryText = '';
+let nameEntryCallback = null;
+let nameEntryScore = 0;
+let nameEntryReturnState = 'gameOver'; // where to go after name entry
 
 // World themes
 const WORLD_THEMES = [
@@ -138,6 +143,25 @@ const WORLD_THEMES = [
 // INPUT
 // ============================================================
 window.addEventListener('keydown', e => {
+    // Name entry mode intercepts all key input
+    if (nameEntryActive) {
+        e.preventDefault();
+        if (e.code === 'Enter') {
+            confirmNameEntry();
+        } else if (e.code === 'Backspace') {
+            nameEntryText = nameEntryText.slice(0, -1);
+        } else if (e.code === 'Escape') {
+            // Confirm with default name on escape
+            confirmNameEntry();
+        } else if (e.key.length === 1 && nameEntryText.length < 10) {
+            // Only allow letters, numbers, spaces, and basic punctuation
+            if (/^[a-zA-Z0-9 ._\-!]$/.test(e.key)) {
+                nameEntryText += e.key.toUpperCase();
+            }
+        }
+        return;
+    }
+
     keys[e.code] = true;
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 
@@ -427,7 +451,13 @@ function hurtPlayer(instant) {
         player.dead = true;
         playDeath();
         setTimeout(() => {
-            transition(() => { gameState = 'gameOver'; });
+            transition(() => {
+                if (coins > 0 && isTopTenScore(coins)) {
+                    startNameEntry(coins, 'gameOver');
+                } else {
+                    gameState = 'gameOver';
+                }
+            });
         }, 800);
     } else {
         player.invincible = INVINCIBILITY_TIME;
@@ -707,10 +737,11 @@ function updateBoss(b) {
                             unlockedLevels[(currentWorld + 1) + '-0'] = true;
                         }
                         saveProgress();
-                        if (currentLevel === 2) {
-                            gameState = 'worldComplete';
+                        const completeState = currentLevel === 2 ? 'worldComplete' : 'levelComplete';
+                        if (coins > 0 && isTopTenScore(coins)) {
+                            startNameEntry(coins, completeState);
                         } else {
-                            gameState = 'levelComplete';
+                            gameState = completeState;
                         }
                         levelCompleteTimer = 0;
                         playLevelComplete();
@@ -2060,6 +2091,15 @@ function drawMenu() {
     ctx.font = '16px Arial';
     ctx.fillText('Total Stars: ' + totalStarCount + ' / 36', canvas.width / 2, canvas.height * 0.95);
 
+    // Top 5 leaderboard panel (positioned to the right of the controls panel)
+    const menuBoard = loadLeaderboard();
+    if (menuBoard.length > 0) {
+        const lbW = 240;
+        const lbX = canvas.width - lbW - 30;
+        const lbY = canvas.height * 0.62 + 65;
+        drawLeaderboardPanel(lbX, lbY, lbW, 5, 'TOP SCORES');
+    }
+
     ctx.textAlign = 'left';
 
     // Show back link
@@ -2094,6 +2134,9 @@ function handleClick(e) {
     mouseX = e.clientX;
     mouseY = e.clientY;
 
+    // Block clicks during name entry
+    if (nameEntryActive) return;
+
     if (gameState === 'menu') {
         const btnW = 220, btnH = 55;
         const btnX = canvas.width / 2 - btnW / 2;
@@ -2105,18 +2148,22 @@ function handleClick(e) {
     } else if (gameState === 'levelSelect') {
         handleLevelSelectClick();
     } else if (gameState === 'levelComplete' || gameState === 'worldComplete') {
+        const hasLeaderboard = loadLeaderboard().length > 0;
+        const centerX = hasLeaderboard ? canvas.width * 0.33 : canvas.width / 2;
         const btnW = 200, btnH = 50;
         // Continue button
-        const btnX = canvas.width / 2 - btnW / 2;
-        const btnY = canvas.height * 0.65;
+        const btnX = centerX - btnW / 2;
+        const btnY = canvas.height * 0.6;
         if (mouseInRect(btnX, btnY, btnW, btnH)) {
             playMenuSelect();
             transition(() => { gameState = 'levelSelect'; });
         }
     } else if (gameState === 'gameOver') {
+        const hasLeaderboard = loadLeaderboard().length > 0;
+        const centerX = hasLeaderboard ? canvas.width * 0.33 : canvas.width / 2;
         const btnW = 200, btnH = 50;
-        const btnX = canvas.width / 2 - btnW / 2;
-        const btnY = canvas.height * 0.6;
+        const btnX = centerX - btnW / 2;
+        const btnY = canvas.height * 0.52;
         if (mouseInRect(btnX, btnY, btnW, btnH)) {
             playMenuSelect();
             lives = 3;
@@ -2298,14 +2345,17 @@ function drawLevelComplete() {
 
     ctx.textAlign = 'center';
 
+    const hasLeaderboard = loadLeaderboard().length > 0;
+    const centerX = hasLeaderboard ? canvas.width * 0.33 : canvas.width / 2;
+
     if (gameState === 'worldComplete') {
         ctx.fillStyle = '#ffaa44';
         ctx.font = 'bold 48px Arial';
-        ctx.fillText('WORLD ' + (currentWorld + 1) + ' COMPLETE!', canvas.width / 2, canvas.height * 0.25);
+        ctx.fillText('WORLD ' + (currentWorld + 1) + ' COMPLETE!', centerX, canvas.height * 0.2);
     } else {
         ctx.fillStyle = '#44ff88';
         ctx.font = 'bold 42px Arial';
-        ctx.fillText('LEVEL COMPLETE!', canvas.width / 2, canvas.height * 0.25);
+        ctx.fillText('LEVEL COMPLETE!', centerX, canvas.height * 0.2);
     }
 
     // Stars collected
@@ -2322,8 +2372,8 @@ function drawLevelComplete() {
         const delay = i * 20;
         if (levelCompleteTimer > delay) {
             const scale = Math.min(1, (levelCompleteTimer - delay) / 15);
-            const sx = canvas.width / 2 - 80 + i * 60;
-            const sy = canvas.height * 0.38;
+            const sx = centerX - 80 + i * 60;
+            const sy = canvas.height * 0.33;
             ctx.save();
             ctx.translate(sx + 15, sy);
             ctx.scale(scale, scale);
@@ -2339,18 +2389,30 @@ function drawLevelComplete() {
     // Coins
     ctx.fillStyle = '#ffdd44';
     ctx.font = '22px Arial';
-    ctx.fillText('Coins collected: ' + levelCoins, canvas.width / 2, canvas.height * 0.5);
+    ctx.fillText('Coins collected: ' + levelCoins, centerX, canvas.height * 0.45);
+
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = 'bold 20px Arial';
+    ctx.fillText('Total Coins: ' + coins, centerX, canvas.height * 0.51);
 
     // Continue button
     if (levelCompleteTimer > 60) {
         const btnW = 200, btnH = 50;
-        const btnX = canvas.width / 2 - btnW / 2;
-        const btnY = canvas.height * 0.65;
+        const btnX = centerX - btnW / 2;
+        const btnY = canvas.height * 0.6;
         ctx.fillStyle = mouseInRect(btnX, btnY, btnW, btnH) ? '#55aa55' : '#44aa44';
         roundRect(btnX, btnY, btnW, btnH, 10);
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 22px Arial';
-        ctx.fillText('CONTINUE', canvas.width / 2, btnY + 33);
+        ctx.fillText('CONTINUE', centerX, btnY + 33);
+    }
+
+    // Leaderboard panel on the right (only show if there are entries)
+    if (hasLeaderboard) {
+        const lbW = 320;
+        const lbX = canvas.width * 0.55;
+        const lbY = canvas.height * 0.12;
+        drawLeaderboardPanel(lbX, lbY, lbW, 10, 'TOP 10 LEADERBOARD');
     }
 
     ctx.textAlign = 'left';
@@ -2361,23 +2423,40 @@ function drawGameOver() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.textAlign = 'center';
+
+    // Layout: left side has game over info + retry, right side has leaderboard
+    const hasLeaderboard = loadLeaderboard().length > 0;
+    const centerX = hasLeaderboard ? canvas.width * 0.33 : canvas.width / 2;
+
     ctx.fillStyle = '#ff4444';
     ctx.font = 'bold 52px Arial';
-    ctx.fillText('GAME OVER', canvas.width / 2, canvas.height * 0.35);
+    ctx.fillText('GAME OVER', centerX, canvas.height * 0.25);
 
     ctx.fillStyle = '#aaa';
     ctx.font = '20px Arial';
-    ctx.fillText('World ' + (currentWorld + 1) + '-' + (currentLevel + 1), canvas.width / 2, canvas.height * 0.45);
+    ctx.fillText('World ' + (currentWorld + 1) + '-' + (currentLevel + 1), centerX, canvas.height * 0.35);
+
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('Coins: ' + coins, centerX, canvas.height * 0.42);
 
     // Retry button
     const btnW = 200, btnH = 50;
-    const btnX = canvas.width / 2 - btnW / 2;
-    const btnY = canvas.height * 0.6;
+    const btnX = centerX - btnW / 2;
+    const btnY = canvas.height * 0.52;
     ctx.fillStyle = mouseInRect(btnX, btnY, btnW, btnH) ? '#aa5555' : '#aa4444';
     roundRect(btnX, btnY, btnW, btnH, 10);
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 22px Arial';
-    ctx.fillText('RETRY', canvas.width / 2, btnY + 33);
+    ctx.fillText('RETRY', centerX, btnY + 33);
+
+    // Leaderboard panel on the right (only show if there are entries)
+    if (hasLeaderboard) {
+        const lbW = 320;
+        const lbX = canvas.width * 0.55;
+        const lbY = canvas.height * 0.15;
+        drawLeaderboardPanel(lbX, lbY, lbW, 10, 'TOP 10 LEADERBOARD');
+    }
 
     ctx.textAlign = 'left';
 }
@@ -2433,6 +2512,191 @@ function loadProgress() {
             allStars = data.allStars || {};
         }
     } catch (e) {}
+}
+
+// ============================================================
+// LEADERBOARD
+// ============================================================
+function loadLeaderboard() {
+    try {
+        const data = JSON.parse(localStorage.getItem('platformerLeaderboard'));
+        if (data && Array.isArray(data)) return data.slice(0, 10);
+    } catch (e) {}
+    return [];
+}
+
+function saveLeaderboard(board) {
+    try {
+        localStorage.setItem('platformerLeaderboard', JSON.stringify(board.slice(0, 10)));
+    } catch (e) {}
+}
+
+function isTopTenScore(score) {
+    const board = loadLeaderboard();
+    if (board.length < 10) return true;
+    return score > board[board.length - 1].score;
+}
+
+function addLeaderboardEntry(name, score) {
+    const board = loadLeaderboard();
+    board.push({ name: name || 'PLAYER', score: score });
+    board.sort((a, b) => b.score - a.score);
+    const trimmed = board.slice(0, 10);
+    saveLeaderboard(trimmed);
+    return trimmed;
+}
+
+function startNameEntry(score, returnState) {
+    nameEntryActive = true;
+    nameEntryText = '';
+    nameEntryScore = score;
+    nameEntryReturnState = returnState;
+}
+
+function confirmNameEntry() {
+    const name = nameEntryText.trim() || 'PLAYER';
+    addLeaderboardEntry(name, nameEntryScore);
+    nameEntryActive = false;
+    nameEntryText = '';
+    gameState = nameEntryReturnState;
+}
+
+function drawLeaderboardPanel(x, y, w, count, title) {
+    const board = loadLeaderboard();
+    const displayCount = Math.min(count, board.length);
+    const lineH = 28;
+    const headerH = 36;
+    const padTop = 10;
+    const padBot = 12;
+    const panelH = headerH + padTop + padBot + Math.max(displayCount, 1) * lineH + 4;
+
+    // Panel background
+    ctx.fillStyle = 'rgba(10, 12, 30, 0.8)';
+    roundRect(x, y, w, panelH, 10);
+
+    // Border
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 10, y);
+    ctx.lineTo(x + w - 10, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + 10);
+    ctx.lineTo(x + w, y + panelH - 10);
+    ctx.quadraticCurveTo(x + w, y + panelH, x + w - 10, y + panelH);
+    ctx.lineTo(x + 10, y + panelH);
+    ctx.quadraticCurveTo(x, y + panelH, x, y + panelH - 10);
+    ctx.lineTo(x, y + 10);
+    ctx.quadraticCurveTo(x, y, x + 10, y);
+    ctx.closePath();
+    ctx.stroke();
+
+    // Title
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 18px Arial';
+    ctx.fillText(title || 'LEADERBOARD', x + w / 2, y + padTop + 22);
+
+    // Divider
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + 20, y + headerH + padTop);
+    ctx.lineTo(x + w - 20, y + headerH + padTop);
+    ctx.stroke();
+
+    if (board.length === 0) {
+        ctx.fillStyle = '#888';
+        ctx.font = '15px Arial';
+        ctx.fillText('No scores yet', x + w / 2, y + headerH + padTop + lineH);
+        ctx.textAlign = 'left';
+        return panelH;
+    }
+
+    // Entries
+    const startEntryY = y + headerH + padTop + lineH;
+    const rankColors = ['#FFD700', '#C0C0C0', '#CD7F32'];
+    for (let i = 0; i < displayCount; i++) {
+        const ey = startEntryY + i * lineH;
+        const entry = board[i];
+        const color = i < 3 ? rankColors[i] : '#ffffff';
+
+        // Rank
+        ctx.textAlign = 'left';
+        ctx.fillStyle = color;
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText((i + 1) + '.', x + 20, ey);
+
+        // Name
+        ctx.fillStyle = color;
+        ctx.font = '16px Arial';
+        ctx.fillText(entry.name, x + 50, ey);
+
+        // Score
+        ctx.textAlign = 'right';
+        ctx.fillStyle = color;
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText(entry.score, x + w - 20, ey);
+    }
+
+    ctx.textAlign = 'left';
+    return panelH;
+}
+
+function drawNameEntry() {
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.textAlign = 'center';
+
+    // Title
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 36px Arial';
+    ctx.fillText('NEW HIGH SCORE!', canvas.width / 2, canvas.height * 0.25);
+
+    // Score
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = 'bold 28px Arial';
+    ctx.fillText('Score: ' + nameEntryScore, canvas.width / 2, canvas.height * 0.33);
+
+    // Prompt
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('ENTER YOUR NAME:', canvas.width / 2, canvas.height * 0.43);
+
+    // Name input box
+    const boxW = 300, boxH = 50;
+    const boxX = canvas.width / 2 - boxW / 2;
+    const boxY = canvas.height * 0.47;
+    ctx.fillStyle = 'rgba(30, 30, 60, 0.9)';
+    roundRect(boxX, boxY, boxW, boxH, 8);
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(boxX + 8, boxY);
+    ctx.lineTo(boxX + boxW - 8, boxY);
+    ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + 8);
+    ctx.lineTo(boxX + boxW, boxY + boxH - 8);
+    ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - 8, boxY + boxH);
+    ctx.lineTo(boxX + 8, boxY + boxH);
+    ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - 8);
+    ctx.lineTo(boxX, boxY + 8);
+    ctx.quadraticCurveTo(boxX, boxY, boxX + 8, boxY);
+    ctx.closePath();
+    ctx.stroke();
+
+    // Typed text with cursor
+    const displayText = nameEntryText + (Math.floor(frameCount / 20) % 2 === 0 ? '_' : '');
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 26px Arial';
+    ctx.fillText(displayText || (Math.floor(frameCount / 20) % 2 === 0 ? '_' : ''), canvas.width / 2, boxY + 34);
+
+    // Instructions
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px Arial';
+    ctx.fillText('Type your name (max 10 chars) and press ENTER', canvas.width / 2, boxY + boxH + 30);
+    ctx.fillText('Press ENTER without typing to use "PLAYER"', canvas.width / 2, boxY + boxH + 55);
+
+    ctx.textAlign = 'left';
 }
 
 // ============================================================
@@ -2568,6 +2832,11 @@ function gameLoop(timestamp) {
     }
 
     if (shaking) ctx.restore(); else ctx.restore();
+
+    // Name entry overlay (drawn on top of everything)
+    if (nameEntryActive) {
+        drawNameEntry();
+    }
 
     updateTransition();
     drawTransition();
