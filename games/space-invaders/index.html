@@ -67,6 +67,7 @@ const POWER_UP_DURATION = {
 
 // --- Game State ---
 let state = 'menu'; // menu, playing, gameover, paused, bossIntro
+let stateBeforePause = null;
 let score = 0;
 let highScore = parseInt(localStorage.getItem('spaceInvadersHighScore')) || 0;
 let lives = 3;
@@ -1186,6 +1187,8 @@ function activatePowerUp(type) {
 }
 
 function update(dt) {
+    if (state === 'paused') return;
+
     if (state === 'bossIntro') {
         bossIntroTimer -= dt;
         if (boss) {
@@ -1685,6 +1688,56 @@ function draw() {
     drawParticles();
     drawHUD();
 
+    // Pause overlay
+    if (state === 'paused') {
+        drawPauseOverlay();
+    }
+
+    ctx.restore();
+}
+
+// --- Pause Overlay ---
+function drawPauseOverlay() {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const btnW = 260, btnH = 50;
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // PAUSED title
+    ctx.save();
+    ctx.shadowColor = '#fff';
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 60px Courier New';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('PAUSED', cx, cy - 60);
+    ctx.shadowBlur = 0;
+
+    // RESUME button
+    const resumeY = cy + 10;
+    ctx.fillStyle = '#4a4';
+    ctx.fillRect(cx - btnW / 2, resumeY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 24px Courier New';
+    ctx.fillText('RESUME', cx, resumeY + btnH / 2);
+
+    // MAIN MENU button
+    const menuY = cy + 80;
+    ctx.fillStyle = '#c44';
+    ctx.fillRect(cx - btnW / 2, menuY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 24px Courier New';
+    ctx.fillText('MAIN MENU', cx, menuY + btnH / 2);
+
+    // Help text
+    ctx.fillStyle = '#888';
+    ctx.font = '14px Courier New';
+    ctx.fillText('Press P to resume | ESC for main menu', cx, menuY + btnH + 30);
+
     ctx.restore();
 }
 
@@ -1760,6 +1813,46 @@ window.addEventListener('keydown', function(e) {
         if (state === 'menu' || state === 'gameover') {
             startGame();
         }
+    }
+
+    // ESC — return to main menu (from any state except menu)
+    if (e.key === 'Escape' && state !== 'menu') {
+        window.location.href = '../../index.html';
+    }
+
+    // P — toggle pause (only during active gameplay states)
+    if ((e.key === 'p' || e.key === 'P') && (state === 'playing' || state === 'bossIntro' || state === 'paused')) {
+        if (state === 'paused') {
+            // Resume
+            state = stateBeforePause;
+            stateBeforePause = null;
+        } else {
+            // Pause
+            stateBeforePause = state;
+            state = 'paused';
+        }
+    }
+});
+
+// --- Pause Menu Click Handler ---
+canvas.addEventListener('click', function(e) {
+    if (state !== 'paused') return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const cx = canvas.width / 2;
+    const btnW = 260, btnH = 50;
+    const resumeY = canvas.height / 2 + 10;
+    const menuY = canvas.height / 2 + 80;
+
+    // RESUME button
+    if (mx >= cx - btnW / 2 && mx <= cx + btnW / 2 && my >= resumeY && my <= resumeY + btnH) {
+        state = stateBeforePause;
+        stateBeforePause = null;
+    }
+    // MAIN MENU button
+    if (mx >= cx - btnW / 2 && mx <= cx + btnW / 2 && my >= menuY && my <= menuY + btnH) {
+        window.location.href = '../../index.html';
     }
 });
 
