@@ -235,6 +235,7 @@ let menuFlicker = 0;
 let stairsPos = { x: 0, y: 0 };
 let openedChests = new Set();
 let notifications = [];
+let stateBeforePause = STATE.PLAYING;
 
 // --- Resize ---
 function resize() {
@@ -248,6 +249,23 @@ resize();
 window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true;
     if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+
+    // ESC key — navigate to main menu from any gameplay state (not menu itself)
+    if (e.key === 'Escape' && gameState !== STATE.MENU) {
+        window.location.href = '../../index.html';
+        return;
+    }
+
+    // P key — toggle pause during gameplay states (PLAYING or LEVELUP)
+    if (e.key.toLowerCase() === 'p' && (gameState === STATE.PLAYING || gameState === STATE.LEVELUP)) {
+        stateBeforePause = gameState;
+        gameState = STATE.PAUSED;
+        return;
+    }
+    if (e.key.toLowerCase() === 'p' && gameState === STATE.PAUSED) {
+        gameState = stateBeforePause;
+        return;
+    }
 });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 canvas.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
@@ -1906,6 +1924,94 @@ function drawMenuScreen() {
     mouse.clicked = false;
 }
 
+function drawPauseScreen() {
+    // Draw the game world behind the overlay (frozen)
+    ctx.fillStyle = '#0a0808';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const sptx = Math.max(0, Math.floor(camera.x / TILE) - 1);
+    const spty = Math.max(0, Math.floor(camera.y / TILE) - 1);
+    const eptx = Math.min(MAP_W, Math.ceil((camera.x + canvas.width) / TILE) + 1);
+    const epty = Math.min(MAP_H, Math.ceil((camera.y + canvas.height) / TILE) + 1);
+    for (let y = spty; y < epty; y++) {
+        for (let x = sptx; x < eptx; x++) {
+            drawTile(x, y, dungeon[y][x], fogMap[y][x]);
+        }
+    }
+    drawLootDrops();
+    drawProjectiles();
+    drawParticles();
+    for (const m of monsters) drawMonster(m);
+    drawPlayer();
+    drawFloatingTexts();
+    drawTorchlight();
+    drawMinimap();
+    drawHUD();
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // "PAUSED" text
+    ctx.font = 'bold 56px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2 - 80);
+
+    // Button dimensions
+    const btnW = 260;
+    const btnH = 50;
+    const gap = 20;
+
+    // RESUME button (green #4a4)
+    const resumeX = canvas.width / 2 - btnW / 2;
+    const resumeY = canvas.height / 2 - 20;
+    const resumeHover = mouse.x > resumeX && mouse.x < resumeX + btnW &&
+                        mouse.y > resumeY && mouse.y < resumeY + btnH;
+
+    ctx.fillStyle = resumeHover ? '#5b5' : '#4a4';
+    ctx.fillRect(resumeX, resumeY, btnW, btnH);
+    ctx.strokeStyle = resumeHover ? '#8e8' : '#6c6';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(resumeX, resumeY, btnW, btnH);
+
+    ctx.font = 'bold 22px Courier New';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('RESUME', canvas.width / 2, resumeY + 33);
+
+    // MAIN MENU button (red #c44)
+    const menuX = canvas.width / 2 - btnW / 2;
+    const menuY = resumeY + btnH + gap;
+    const menuHover = mouse.x > menuX && mouse.x < menuX + btnW &&
+                      mouse.y > menuY && mouse.y < menuY + btnH;
+
+    ctx.fillStyle = menuHover ? '#d55' : '#c44';
+    ctx.fillRect(menuX, menuY, btnW, btnH);
+    ctx.strokeStyle = menuHover ? '#f88' : '#e66';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(menuX, menuY, btnW, btnH);
+
+    ctx.font = 'bold 22px Courier New';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('MAIN MENU', canvas.width / 2, menuY + 33);
+
+    // Help text
+    ctx.font = '14px Courier New';
+    ctx.fillStyle = '#999';
+    ctx.fillText('Press P to resume | ESC for main menu', canvas.width / 2, menuY + btnH + 35);
+
+    // Handle clicks
+    if (mouse.clicked) {
+        if (resumeHover) {
+            gameState = stateBeforePause;
+        }
+        if (menuHover) {
+            window.location.href = '../../index.html';
+        }
+        mouse.clicked = false;
+    }
+}
+
 // --- Main Game Loop ---
 let lastTime = 0;
 
@@ -1992,6 +2098,11 @@ function gameLoop(timestamp) {
         case STATE.DEAD:
             backLink.style.display = 'none';
             drawDeathScreen();
+            break;
+
+        case STATE.PAUSED:
+            backLink.style.display = 'none';
+            drawPauseScreen();
             break;
     }
 
