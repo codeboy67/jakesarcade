@@ -83,8 +83,9 @@ function sfxMilestone() {
 }
 
 // ---- GAME STATE ----
-const STATE = { MENU: 0, PLAYING: 1, GAMEOVER: 2 };
+const STATE = { MENU: 0, PLAYING: 1, GAMEOVER: 2, PAUSED: 3 };
 let state = STATE.MENU;
+let stateBeforePause = STATE.PLAYING;
 let distance = 0; // in pixels
 let distanceMetres = 0;
 let coins = 0;
@@ -175,6 +176,22 @@ window.addEventListener('keydown', e => {
     if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.code === 'KeyS') {
         e.preventDefault();
     }
+    // ESC: navigate to main menu from any non-menu state
+    if (e.code === 'Escape' && state !== STATE.MENU) {
+        window.location.href = '../../index.html';
+        return;
+    }
+    // P: toggle pause during gameplay or while paused
+    if (e.code === 'KeyP') {
+        if (state === STATE.PLAYING || state === STATE.GAMEOVER) {
+            stateBeforePause = state;
+            state = STATE.PAUSED;
+            return;
+        } else if (state === STATE.PAUSED) {
+            state = stateBeforePause;
+            return;
+        }
+    }
     if (!keys[e.code]) {
         keys[e.code] = true;
         if (e.code === 'Space' || e.code === 'ArrowUp') jumpPressed = true;
@@ -227,6 +244,18 @@ function handleClick(mx, my) {
         const by = canvas.height / 2 + 100;
         if (mx > bx - 100 && mx < bx + 100 && my > by - 30 && my < by + 30) {
             goToMenu();
+        }
+    } else if (state === STATE.PAUSED) {
+        const bx = canvas.width / 2;
+        // RESUME button
+        const resumeY = canvas.height / 2 + 10;
+        if (mx > bx - 130 && mx < bx + 130 && my > resumeY - 25 && my < resumeY + 25) {
+            state = stateBeforePause;
+        }
+        // MAIN MENU button
+        const menuY = canvas.height / 2 + 75;
+        if (mx > bx - 130 && mx < bx + 130 && my > menuY - 25 && my < menuY + 25) {
+            window.location.href = '../../index.html';
         }
     }
 }
@@ -717,7 +746,7 @@ function draw() {
     // Parallax background layers
     drawBgLayers();
 
-    if (state === STATE.PLAYING || state === STATE.GAMEOVER) {
+    if (state === STATE.PLAYING || state === STATE.GAMEOVER || state === STATE.PAUSED) {
         drawGround(theme);
         drawGaps();
         drawObstacles();
@@ -730,10 +759,11 @@ function draw() {
 
     if (state === STATE.MENU) drawMenu();
     if (state === STATE.GAMEOVER) drawGameOver();
+    if (state === STATE.PAUSED) drawPaused();
 }
 
 function drawBgLayers() {
-    const gY = state === STATE.PLAYING || state === STATE.GAMEOVER ? groundY : canvas.height - 80;
+    const gY = state === STATE.PLAYING || state === STATE.GAMEOVER || state === STATE.PAUSED ? groundY : canvas.height - 80;
     const theme = themes[currentTheme];
     const layerAlpha = [0.15, 0.25, 0.4];
     const layerColors = {
@@ -1395,6 +1425,46 @@ function drawGameOver() {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 20px Arial';
     ctx.fillText('PLAY AGAIN', bx, by + 7);
+}
+
+function drawPaused() {
+    const W = canvas.width;
+    const H = canvas.height;
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+
+    // PAUSED title
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('PAUSED', W / 2, H / 2 - 60);
+
+    // RESUME button (green #4a4)
+    const resumeY = H / 2 + 10;
+    ctx.fillStyle = '#44aa44';
+    ctx.beginPath();
+    roundRect(ctx, W / 2 - 130, resumeY - 25, 260, 50, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('RESUME', W / 2, resumeY + 8);
+
+    // MAIN MENU button (red #c44)
+    const menuY = H / 2 + 75;
+    ctx.fillStyle = '#cc4444';
+    ctx.beginPath();
+    roundRect(ctx, W / 2 - 130, menuY - 25, 260, 50, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('MAIN MENU', W / 2, menuY + 8);
+
+    // Help text
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '14px Arial';
+    ctx.fillText('Press P to resume | ESC for main menu', W / 2, H / 2 + 130);
 }
 
 function roundRect(ctx, x, y, w, h, r) {
