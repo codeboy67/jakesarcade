@@ -218,6 +218,8 @@ let terrainTheme = 0;
 let keys = {};
 let shakeAmount = 0;
 let shakeDecay = 0.9;
+let paused = false;
+let stateBeforePause = null;
 let turnTransitionTimer = 0;
 let roundEndTimer = 0;
 let matchEndTimer = 0;
@@ -771,6 +773,37 @@ document.addEventListener('keydown', (e) => {
     keys[e.key] = true;
     ensureAudio();
 
+    // ESC key — return to main menu from any non-menu state
+    if (e.key === 'Escape' && gameState !== 'menu') {
+        if (paused) {
+            paused = false;
+            stateBeforePause = null;
+        }
+        window.location.href = '../../index.html';
+        e.preventDefault();
+        return;
+    }
+
+    // P key — toggle pause during gameplay
+    if ((e.key === 'p' || e.key === 'P') && gameState !== 'menu') {
+        if (!paused) {
+            paused = true;
+            stateBeforePause = gameState;
+        } else {
+            paused = false;
+            gameState = stateBeforePause;
+            stateBeforePause = null;
+        }
+        e.preventDefault();
+        return;
+    }
+
+    // If paused, block all other input
+    if (paused) {
+        e.preventDefault();
+        return;
+    }
+
     if (gameState === 'menu') {
         handleMenuInput(e.key);
         e.preventDefault();
@@ -821,6 +854,35 @@ document.addEventListener('keydown', (e) => {
 
 document.addEventListener('keyup', (e) => {
     keys[e.key] = false;
+});
+
+// ---- PAUSE OVERLAY CLICK HANDLING ----
+canvas.addEventListener('click', (e) => {
+    if (!paused) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top) * scaleY;
+
+    const btnW = 260;
+    const btnH = 50;
+    const btnX = W / 2 - btnW / 2;
+    const resumeBtnY = H / 2 - 10;
+    const menuBtnY = H / 2 + 60;
+
+    // Resume button
+    if (mx >= btnX && mx <= btnX + btnW && my >= resumeBtnY && my <= resumeBtnY + btnH) {
+        paused = false;
+        gameState = stateBeforePause;
+        stateBeforePause = null;
+    }
+    // Main Menu button
+    if (mx >= btnX && mx <= btnX + btnW && my >= menuBtnY && my <= menuBtnY + btnH) {
+        paused = false;
+        stateBeforePause = null;
+        window.location.href = '../../index.html';
+    }
 });
 
 function handleMenuInput(key) {
@@ -1561,8 +1623,48 @@ function drawTrajectoryPreview() {
     ctx.restore();
 }
 
+// ---- PAUSE OVERLAY ----
+function drawPauseOverlay() {
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+
+    // "PAUSED" text
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 56px "Segoe UI", Arial';
+    ctx.fillText('PAUSED', W / 2, H / 2 - 60);
+
+    const btnW = 260;
+    const btnH = 50;
+    const btnX = W / 2 - btnW / 2;
+
+    // Resume button (green #4a4)
+    const resumeBtnY = H / 2 - 10;
+    ctx.fillStyle = '#4a4';
+    ctx.fillRect(btnX, resumeBtnY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px "Segoe UI", Arial';
+    ctx.fillText('RESUME', W / 2, resumeBtnY + 33);
+
+    // Main Menu button (red #c44)
+    const menuBtnY = H / 2 + 60;
+    ctx.fillStyle = '#c44';
+    ctx.fillRect(btnX, menuBtnY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px "Segoe UI", Arial';
+    ctx.fillText('MAIN MENU', W / 2, menuBtnY + 33);
+
+    // Help text below buttons
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px "Segoe UI", Arial';
+    ctx.fillText('Press P to resume | ESC for main menu', W / 2, menuBtnY + btnH + 30);
+}
+
 // ---- MAIN LOOP ----
 function update() {
+    if (paused) return;
     if (gameState === 'playing') {
         handlePlayingInput();
         updateProjectiles();
@@ -1662,6 +1764,9 @@ function draw() {
     if (gameState === 'playing') drawHUD();
     if (gameState === 'roundEnd') drawRoundEnd();
     if (gameState === 'matchEnd') drawMatchEnd();
+
+    // Pause overlay drawn last, on top of everything
+    if (paused) drawPauseOverlay();
 }
 
 function gameLoop() {
