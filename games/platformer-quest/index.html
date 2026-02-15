@@ -1981,17 +1981,84 @@ function drawMenu() {
     ctx.font = 'bold 26px Arial';
     ctx.fillText('PLAY', canvas.width / 2, btnY + 36);
 
-    // Controls info
-    ctx.fillStyle = '#88aacc';
-    ctx.font = '15px Arial';
-    ctx.fillText('Arrow Keys / WASD to Move  |  Space to Jump  |  Shift to Dash', canvas.width / 2, canvas.height * 0.78);
-    ctx.fillText('Wall slide by holding into walls  |  Double jump in mid-air', canvas.width / 2, canvas.height * 0.82);
+    // Controls panel
+    {
+        const controls = [
+            { key: 'A / D  or  Arrow Keys', desc: 'Move left / right' },
+            { key: 'SPACE', desc: 'Jump  (tap twice for double jump)' },
+            { key: 'SHIFT', desc: 'Dash' },
+            { key: 'Hold toward wall', desc: 'Wall slide' },
+            { key: 'P', desc: 'Pause' },
+            { key: 'ESC', desc: 'Main menu' },
+        ];
+        const lineH = 26;
+        const headerH = 32;
+        const padX = 28, padTop = 14, padBot = 16;
+        const panelH = headerH + padTop + padBot + controls.length * lineH + 4;
+        const panelW = 400;
+        const panelX = canvas.width / 2 - panelW / 2;
+        const panelY = canvas.height * 0.62 + 65;
+
+        // Semi-transparent dark panel background
+        ctx.fillStyle = 'rgba(10, 12, 30, 0.75)';
+        roundRect(panelX, panelY, panelW, panelH, 12);
+
+        // Panel border
+        ctx.strokeStyle = 'rgba(100, 160, 255, 0.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(panelX + 12, panelY);
+        ctx.lineTo(panelX + panelW - 12, panelY);
+        ctx.quadraticCurveTo(panelX + panelW, panelY, panelX + panelW, panelY + 12);
+        ctx.lineTo(panelX + panelW, panelY + panelH - 12);
+        ctx.quadraticCurveTo(panelX + panelW, panelY + panelH, panelX + panelW - 12, panelY + panelH);
+        ctx.lineTo(panelX + 12, panelY + panelH);
+        ctx.quadraticCurveTo(panelX, panelY + panelH, panelX, panelY + panelH - 12);
+        ctx.lineTo(panelX, panelY + 12);
+        ctx.quadraticCurveTo(panelX, panelY, panelX + 12, panelY);
+        ctx.closePath();
+        ctx.stroke();
+
+        // CONTROLS heading
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 20px Arial';
+        ctx.fillText('CONTROLS', canvas.width / 2, panelY + padTop + 20);
+
+        // Divider line under heading
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(panelX + 30, panelY + headerH + padTop);
+        ctx.lineTo(panelX + panelW - 30, panelY + headerH + padTop);
+        ctx.stroke();
+
+        // Control lines
+        const startY = panelY + headerH + padTop + lineH;
+        ctx.textAlign = 'right';
+        const keyCol = canvas.width / 2 - 12;
+        const descCol = canvas.width / 2 + 12;
+        for (let i = 0; i < controls.length; i++) {
+            const y = startY + i * lineH;
+            // Key label in gold
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 17px Arial';
+            ctx.fillText(controls[i].key, keyCol, y);
+            // Description in white
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '17px Arial';
+            ctx.fillText(controls[i].desc, descCol, y);
+            ctx.textAlign = 'right';
+        }
+        ctx.textAlign = 'center';
+    }
 
     // High score / progress
     const totalStarCount = Object.values(allStars).reduce((sum, s) => sum + s.reduce((a, b) => a + b, 0), 0);
     ctx.fillStyle = '#ffff44';
     ctx.font = '16px Arial';
-    ctx.fillText('Total Stars: ' + totalStarCount + ' / 36', canvas.width / 2, canvas.height * 0.9);
+    ctx.fillText('Total Stars: ' + totalStarCount + ' / 36', canvas.width / 2, canvas.height * 0.95);
 
     ctx.textAlign = 'left';
 
