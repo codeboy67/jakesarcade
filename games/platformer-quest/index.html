@@ -124,6 +124,7 @@ let transitionState = 'none'; // none, fadeOut, fadeIn
 let transitionCallback = null;
 let shakeTimer = 0;
 let shakeIntensity = 0;
+let stateBeforePause = null;
 
 // World themes
 const WORLD_THEMES = [
@@ -139,6 +140,26 @@ const WORLD_THEMES = [
 window.addEventListener('keydown', e => {
     keys[e.code] = true;
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+
+    // ESC — return to main menu from any gameplay state (not menu/levelSelect)
+    if (e.code === 'Escape' && gameState !== 'menu' && gameState !== 'levelSelect') {
+        if (gameState === 'paused') {
+            stateBeforePause = null;
+        }
+        window.location.href = '../../index.html';
+        return;
+    }
+
+    // P — toggle pause during gameplay states
+    if (e.code === 'KeyP') {
+        if (gameState === 'paused') {
+            gameState = stateBeforePause || 'playing';
+            stateBeforePause = null;
+        } else if (gameState === 'playing' || gameState === 'levelComplete' || gameState === 'worldComplete' || gameState === 'gameOver' || gameState === 'bossIntro') {
+            stateBeforePause = gameState;
+            gameState = 'paused';
+        }
+    }
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
@@ -2035,6 +2056,21 @@ function handleClick(e) {
             coins = 0;
             transition(() => { gameState = 'levelSelect'; });
         }
+    } else if (gameState === 'paused') {
+        const btnW = 260, btnH = 50;
+        const resumeBtnX = canvas.width / 2 - btnW / 2;
+        const resumeBtnY = canvas.height / 2 - 10;
+        const menuBtnX = canvas.width / 2 - btnW / 2;
+        const menuBtnY = canvas.height / 2 + 55;
+        if (mouseInRect(resumeBtnX, resumeBtnY, btnW, btnH)) {
+            playMenuSelect();
+            gameState = stateBeforePause || 'playing';
+            stateBeforePause = null;
+        } else if (mouseInRect(menuBtnX, menuBtnY, btnW, btnH)) {
+            playMenuSelect();
+            stateBeforePause = null;
+            window.location.href = '../../index.html';
+        }
     }
 }
 
@@ -2347,6 +2383,57 @@ function applyShake() {
 }
 
 // ============================================================
+// PAUSE SCREEN
+// ============================================================
+function drawPaused() {
+    // Draw the game scene behind (frozen)
+    drawBackground();
+    drawPlatforms();
+    drawHazards();
+    drawCheckpoints();
+    drawCollectables();
+    drawEnemies();
+    drawProjectiles();
+    drawPlayer();
+    drawParticles();
+    drawHUD();
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // PAUSED title
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 56px Arial';
+    ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2 - 70);
+
+    // Resume button (green)
+    const btnW = 260, btnH = 50;
+    const resumeBtnX = canvas.width / 2 - btnW / 2;
+    const resumeBtnY = canvas.height / 2 - 10;
+    ctx.fillStyle = mouseInRect(resumeBtnX, resumeBtnY, btnW, btnH) ? '#5cb85c' : '#4a4';
+    roundRect(resumeBtnX, resumeBtnY, btnW, btnH, 8);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('RESUME', canvas.width / 2, resumeBtnY + 33);
+
+    // Main Menu button (red)
+    const menuBtnX = canvas.width / 2 - btnW / 2;
+    const menuBtnY = canvas.height / 2 + 55;
+    ctx.fillStyle = mouseInRect(menuBtnX, menuBtnY, btnW, btnH) ? '#d55' : '#c44';
+    roundRect(menuBtnX, menuBtnY, btnW, btnH, 8);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px Arial';
+    ctx.fillText('MAIN MENU', canvas.width / 2, menuBtnY + 33);
+
+    // Hint text
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px Arial';
+    ctx.fillText('Press P to resume | ESC for main menu', canvas.width / 2, menuBtnY + 90);
+}
+
+// ============================================================
 // MAIN GAME LOOP
 // ============================================================
 function gameLoop(timestamp) {
@@ -2385,6 +2472,9 @@ function gameLoop(timestamp) {
             drawPlayer();
             drawParticles();
             drawHUD();
+            break;
+        case 'paused':
+            drawPaused();
             break;
         case 'levelComplete':
         case 'worldComplete':
