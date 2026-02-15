@@ -1,0 +1,1434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Escape Room - Jake's Arcade</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;overflow:hidden;font-family:'Segoe UI',Arial,sans-serif;}
+canvas{display:block;}
+#backLink{position:fixed;top:10px;left:10px;color:#aaa;font-size:14px;text-decoration:none;z-index:100;display:none;font-family:'Segoe UI',Arial,sans-serif;}
+#backLink:hover{color:#fff;}
+</style>
+</head>
+<body>
+<a id="backLink" href="../../index.html">&larr; Back to Jake's Arcade</a>
+<canvas id="c"></canvas>
+<script>
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d'),backLink=document.getElementById('backLink');
+let W,H;
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
+resize();window.addEventListener('resize',resize);
+
+// Audio
+let audioCtx;
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();}
+function playTone(freq,dur,type,vol){
+initAudio();const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+o.type=type||'sine';o.frequency.value=freq;g.gain.value=vol||0.15;
+o.connect(g);g.connect(audioCtx.destination);
+o.start();g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+dur);
+o.stop(audioCtx.currentTime+dur);
+}
+function sfxClick(){playTone(800,0.08,'square',0.1);}
+function sfxCorrect(){playTone(523,0.15,'sine',0.2);setTimeout(()=>playTone(659,0.15,'sine',0.2),100);setTimeout(()=>playTone(784,0.3,'sine',0.2),200);}
+function sfxWrong(){playTone(200,0.3,'sawtooth',0.15);setTimeout(()=>playTone(150,0.3,'sawtooth',0.15),150);}
+function sfxPickup(){playTone(600,0.1,'sine',0.15);setTimeout(()=>playTone(900,0.15,'sine',0.15),80);}
+function sfxUnlock(){for(let i=0;i<5;i++)setTimeout(()=>playTone(400+i*100,0.2,'sine',0.12),i*80);}
+function sfxHint(){playTone(440,0.2,'triangle',0.12);setTimeout(()=>playTone(550,0.2,'triangle',0.12),150);}
+function sfxDoor(){playTone(150,0.4,'square',0.1);setTimeout(()=>playTone(120,0.3,'square',0.08),200);}
+
+// State
+let state='menu'; // menu, game, roomComplete
+let currentRoom=0;
+let mouseX=0,mouseY=0,cursorStyle='default';
+let inventory=[],selectedItem=-1;
+let hints=3,hintText='',hintTimer=0;
+let timer=0,timerRunning=false,lastTime=0;
+let message='',messageTimer=0;
+let roomData={};
+let clickAnim=[];
+let completionTime=0;
+let bestTimes=JSON.parse(localStorage.getItem('escapeRoomBest')||'{}');
+let roomCompleted=JSON.parse(localStorage.getItem('escapeRoomDone')||'{}');
+let hoveredObj=null;
+let menuHover=-1;
+let menuBtnHover='';
+
+canvas.addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY;});
+canvas.addEventListener('click',e=>{
+initAudio();
+mouseX=e.clientX;mouseY=e.clientY;
+clickAnim.push({x:mouseX,y:mouseY,t:0});
+handleClick(mouseX,mouseY);
+});
+
+// Rooms definition
+const roomDefs=[
+{name:'School Classroom',difficulty:'Easy',colors:['#f5e6c8','#8B4513','#2d5016'],desc:'Find the key and escape!'},
+{name:'Science Lab',difficulty:'Medium',colors:['#e8f0f8','#3a6fa0','#1a1a2e'],desc:'Mix chemicals and crack the safe!'},
+{name:'Haunted Attic',difficulty:'Medium',colors:['#2a1a2e','#6b3a6b','#1a0a1e'],desc:'Piece together the torn note!'},
+{name:'Space Station',difficulty:'Hard',colors:['#0a0a2e','#1a3a6e','#0a0a1e'],desc:'Fix the airlock and escape!'},
+{name:'Pirate Ship',difficulty:'Hard',colors:['#8B6914','#4a2a0a','#1a3a5e'],desc:'Follow the map and find the key!'}
+];
+
+function initRoom(idx){
+currentRoom=idx;inventory=[];selectedItem=-1;hints=3;hintText='';hintTimer=0;
+timer=0;timerRunning=true;lastTime=performance.now();message='';messageTimer=0;
+hoveredObj=null;
+switch(idx){
+case 0:initClassroom();break;
+case 1:initScienceLab();break;
+case 2:initHauntedAttic();break;
+case 3:initSpaceStation();break;
+case 4:initPirateShip();break;
+}
+state='game';
+}
+
+function completeRoom(){
+timerRunning=false;completionTime=timer;
+sfxUnlock();
+const key='room'+currentRoom;
+roomCompleted[key]=true;
+if(!bestTimes[key]||timer<bestTimes[key])bestTimes[key]=timer;
+localStorage.setItem('escapeRoomBest',JSON.stringify(bestTimes));
+localStorage.setItem('escapeRoomDone',JSON.stringify(roomCompleted));
+state='roomComplete';
+}
+
+function showMessage(txt,dur){message=txt;messageTimer=dur||3;}
+
+// ============ ROOM 1: CLASSROOM ============
+function initClassroom(){
+roomData={
+deskOpen:false,keyFound:false,boardSolved:false,doorUnlocked:false,
+mathAnswer:7, mathProblem:'3 x 9 - 20 = ?',
+codeEntered:'',drawerChecked:false,posterMoved:false,
+codeNeeded:'427',chalkFound:false,
+objects:[]
+};
+roomData.mathAnswer=7;
+roomData.codeNeeded='427';
+}
+
+function drawClassroom(){
+const d=roomData,bx=W*0.05,by=H*0.05,bw=W*0.9,bh=H*0.75;
+// Floor
+ctx.fillStyle='#c4a46c';ctx.fillRect(0,H*0.65,W,H*0.35);
+// Walls
+ctx.fillStyle='#f5e6c8';ctx.fillRect(bx,by,bw,H*0.62);
+// Skirting
+ctx.fillStyle='#8B4513';ctx.fillRect(bx,H*0.62,bw,H*0.05);
+// Whiteboard
+const wbx=W*0.25,wby=H*0.08,wbw=W*0.5,wbh=H*0.28;
+ctx.fillStyle='#fff';ctx.fillRect(wbx,wby,wbw,wbh);
+ctx.strokeStyle='#888';ctx.lineWidth=4;ctx.strokeRect(wbx,wby,wbw,wbh);
+ctx.fillStyle='#333';ctx.font=`${Math.min(24,W*0.025)}px monospace`;
+ctx.textAlign='center';
+if(!d.boardSolved){
+ctx.fillText(d.mathProblem,wbx+wbw/2,wby+wbh*0.35);
+ctx.fillText('Solve to get first digit',wbx+wbw/2,wby+wbh*0.6);
+ctx.font=`${Math.min(18,W*0.018)}px monospace`;
+ctx.fillText('(Click the board to answer)',wbx+wbw/2,wby+wbh*0.8);
+}else{
+ctx.fillStyle='#2a2';
+ctx.fillText('Correct! First digit: '+d.mathAnswer,wbx+wbw/2,wby+wbh/2);
+}
+ctx.textAlign='left';
+// Teacher desk
+const tdx=W*0.6,tdy=H*0.48,tdw=W*0.25,tdh=H*0.18;
+ctx.fillStyle='#6b3a1a';ctx.fillRect(tdx,tdy,tdw,tdh);
+ctx.fillStyle='#5a2a0a';ctx.fillRect(tdx+tdw*0.1,tdy+tdh*0.3,tdw*0.35,tdh*0.5);
+if(!d.deskOpen){
+ctx.fillStyle='#c8a060';
+ctx.fillRect(tdx+tdw*0.15,tdy+tdh*0.5,tdw*0.25,tdh*0.08);
+}
+// Student desks
+for(let i=0;i<3;i++){
+const sx=W*0.08+i*W*0.17,sy=H*0.52;
+ctx.fillStyle='#a0784a';ctx.fillRect(sx,sy,W*0.12,H*0.1);
+ctx.fillStyle='#888';
+ctx.fillRect(sx+W*0.01,sy+H*0.1,W*0.01,H*0.08);
+ctx.fillRect(sx+W*0.1,sy+H*0.1,W*0.01,H*0.08);
+}
+// Poster on wall (hides digit)
+const px=W*0.08,py=H*0.12,pw=W*0.12,ph=H*0.18;
+if(!d.posterMoved){
+ctx.fillStyle='#e44';ctx.fillRect(px,py,pw,ph);
+ctx.fillStyle='#fff';ctx.font=`${Math.min(14,W*0.014)}px Arial`;
+ctx.textAlign='center';ctx.fillText('SCHOOL',px+pw/2,py+ph*0.4);
+ctx.fillText('RULES',px+pw/2,py+ph*0.65);ctx.textAlign='left';
+}else{
+ctx.fillStyle='#d4c6a8';ctx.fillRect(px,py,pw,ph);
+ctx.fillStyle='#333';ctx.font=`bold ${Math.min(28,W*0.028)}px Arial`;
+ctx.textAlign='center';ctx.fillText('2',px+pw/2,py+ph*0.55);
+ctx.font=`${Math.min(12,W*0.012)}px Arial`;
+ctx.fillText('Second digit',px+pw/2,py+ph*0.8);ctx.textAlign='left';
+}
+// Bookshelf
+const bsx=W*0.78,bsy=H*0.1,bsw=W*0.14,bsht=H*0.35;
+ctx.fillStyle='#5a3a1a';ctx.fillRect(bsx,bsy,bsw,bsht);
+for(let i=0;i<3;i++){
+ctx.fillStyle='#4a2a0a';ctx.fillRect(bsx,bsy+i*bsht/3,bsw,4);
+const colors=['#c44','#44c','#4a4','#cc4','#c4c'];
+for(let j=0;j<4;j++){
+ctx.fillStyle=colors[(i*4+j)%5];
+ctx.fillRect(bsx+8+j*(bsw-16)/4,bsy+i*bsht/3+6,bsw/5-4,bsht/3-12);
+}
+}
+// Chalk on floor (gives 3rd digit clue)
+if(!d.chalkFound){
+ctx.fillStyle='#fff';ctx.fillRect(W*0.45,H*0.58,W*0.02,H*0.012);
+ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font=`${Math.min(10,W*0.01)}px Arial`;
+ctx.fillText('chalk',W*0.44,H*0.61);
+}
+// Door
+const dx=W*0.88,dy=H*0.3,dw=W*0.08,dh=H*0.35;
+ctx.fillStyle=d.doorUnlocked?'#2a8':'#6b4a2a';ctx.fillRect(dx,dy,dw,dh);
+ctx.fillStyle='#c8a060';ctx.beginPath();ctx.arc(dx+dw*0.8,dy+dh*0.5,dw*0.1,0,Math.PI*2);ctx.fill();
+if(!d.doorUnlocked){
+// Lock display
+ctx.fillStyle='#333';ctx.fillRect(dx+dw*0.15,dy+dh*0.35,dw*0.5,dh*0.15);
+ctx.fillStyle='#0f0';ctx.font=`${Math.min(20,W*0.02)}px monospace`;
+ctx.textAlign='center';
+ctx.fillText(d.codeEntered+'_'.repeat(3-d.codeEntered.length),dx+dw*0.4,dy+dh*0.45);
+ctx.textAlign='left';
+}else{
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(16,W*0.016)}px Arial`;
+ctx.textAlign='center';ctx.fillText('EXIT',dx+dw/2,dy+dh/2);ctx.textAlign='left';
+}
+}
+
+function clickClassroom(x,y){
+const d=roomData;
+const wbx=W*0.25,wby=H*0.08,wbw=W*0.5,wbh=H*0.28;
+const tdx=W*0.6,tdy=H*0.48,tdw=W*0.25,tdh=H*0.18;
+const px=W*0.08,py=H*0.12,pw=W*0.12,ph=H*0.18;
+const dx=W*0.88,dy=H*0.3,dw=W*0.08,dh=H*0.35;
+// Board
+if(!d.boardSolved&&x>wbx&&x<wbx+wbw&&y>wby&&y<wby+wbh){
+const ans=prompt('Solve: 3 x 9 - 20 = ?');
+if(ans&&parseInt(ans)===7){d.boardSolved=true;sfxCorrect();showMessage('First digit is 7!');}
+else{sfxWrong();showMessage('Wrong answer! Try again.');}
+return;
+}
+// Teacher desk drawer
+if(x>tdx&&x<tdx+tdw&&y>tdy&&y<tdy+tdh){
+if(!d.deskOpen){d.deskOpen=true;sfxClick();showMessage('You found a note: "The code is three digits"');}
+return;
+}
+// Poster
+if(!d.posterMoved&&x>px&&x<px+pw&&y>py&&y<py+ph){
+d.posterMoved=true;sfxClick();showMessage('Behind the poster: the second digit is 2!');
+return;
+}
+// Chalk
+if(!d.chalkFound&&x>W*0.43&&x<W*0.49&&y>H*0.56&&y<H*0.63){
+d.chalkFound=true;sfxPickup();showMessage('The chalk has "third digit = 7" written on it!');
+return;
+}
+// Door
+if(x>dx&&x<dx+dw&&y>dy&&y<dy+dh){
+if(d.doorUnlocked){sfxDoor();completeRoom();return;}
+const code=prompt('Enter 3-digit code:');
+if(code==='727'){d.doorUnlocked=true;sfxUnlock();showMessage('Door unlocked! Click to escape!');}
+else{sfxWrong();showMessage('Wrong code!');}
+return;
+}
+}
+
+function hoverClassroom(x,y){
+const wbx=W*0.25,wby=H*0.08,wbw=W*0.5,wbh=H*0.28;
+const tdx=W*0.6,tdy=H*0.48,tdw=W*0.25,tdh=H*0.18;
+const px=W*0.08,py=H*0.12,pw=W*0.12,ph=H*0.18;
+const dx=W*0.88,dy=H*0.3,dw=W*0.08,dh=H*0.35;
+if(!roomData.boardSolved&&x>wbx&&x<wbx+wbw&&y>wby&&y<wby+wbh)return'Whiteboard';
+if(x>tdx&&x<tdx+tdw&&y>tdy&&y<tdy+tdh)return'Teacher Desk';
+if(!roomData.posterMoved&&x>px&&x<px+pw&&y>py&&y<py+ph)return'Poster';
+if(!roomData.chalkFound&&x>W*0.43&&x<W*0.49&&y>H*0.56&&y<H*0.63)return'Chalk';
+if(x>dx&&x<dx+dw&&y>dy&&y<dy+dh)return'Door';
+return null;
+}
+
+function hintsClassroom(){
+const d=roomData;
+if(!d.boardSolved)return'Try solving the maths problem on the whiteboard.';
+if(!d.posterMoved)return'Something might be hidden behind the poster on the wall.';
+if(!d.chalkFound)return'Look carefully on the floor near the desks.';
+return'You need a 3-digit code. The digits are 7, 2, and 7. Enter them at the door.';
+}
+
+// ============ ROOM 2: SCIENCE LAB ============
+function initScienceLab(){
+roomData={
+chemicals:['Red','Blue','Green','Yellow'],
+mixOrder:[],correctOrder:['Red','Blue','Green'],
+mixed:false,safeOpen:false,uvFound:false,
+safeCode:'',correctSafe:'395',
+uvLightFound:false,gogglesFound:false,
+cabinetOpen:false,escaped:false
+};
+}
+
+function drawScienceLab(){
+const d=roomData;
+// Floor
+ctx.fillStyle='#c8c8c8';ctx.fillRect(0,H*0.65,W,H*0.35);
+// Walls
+ctx.fillStyle='#e8f0f8';ctx.fillRect(W*0.05,H*0.05,W*0.9,H*0.62);
+// Lab bench
+const lx=W*0.1,ly=H*0.45,lw=W*0.5,lh=H*0.2;
+ctx.fillStyle='#2a2a2a';ctx.fillRect(lx,ly,lw,lh);
+ctx.fillStyle='#3a3a3a';ctx.fillRect(lx,ly,lw,H*0.03);
+// Chemicals
+const cw=W*0.06,ch=H*0.15;
+const cColors=['#e33','#33e','#3a3','#ee3'];
+for(let i=0;i<4;i++){
+const cx=lx+W*0.03+i*W*0.12,cy=ly-ch+H*0.01;
+ctx.fillStyle=cColors[i];ctx.globalAlpha=0.8;
+ctx.fillRect(cx,cy,cw,ch);ctx.globalAlpha=1;
+ctx.strokeStyle='#555';ctx.lineWidth=2;ctx.strokeRect(cx,cy,cw,ch);
+ctx.fillStyle='#fff';ctx.font=`${Math.min(12,W*0.012)}px Arial`;
+ctx.textAlign='center';ctx.fillText(d.chemicals[i],cx+cw/2,cy+ch+14);ctx.textAlign='left';
+}
+// Mixing beaker
+const mx=lx+lw+W*0.05,my=ly-H*0.1,mw=W*0.08,mh=H*0.18;
+ctx.fillStyle='#ddd';ctx.globalAlpha=0.6;ctx.fillRect(mx,my,mw,mh);ctx.globalAlpha=1;
+ctx.strokeStyle='#999';ctx.lineWidth=2;ctx.strokeRect(mx,my,mw,mh);
+// Show mix progress
+if(d.mixOrder.length>0){
+const mixH=mh*0.7*(d.mixOrder.length/3);
+const mixColors={'Red':'rgba(220,50,50,0.7)','Blue':'rgba(50,50,220,0.7)','Green':'rgba(50,180,50,0.7)'};
+let grad=ctx.createLinearGradient(mx,my+mh-mixH,mx,my+mh);
+d.mixOrder.forEach((c,i)=>{grad.addColorStop(i/Math.max(d.mixOrder.length-1,1),mixColors[c]||'#888');});
+ctx.fillStyle=grad;ctx.fillRect(mx+3,my+mh-mixH,mw-6,mixH);
+}
+ctx.fillStyle='#555';ctx.font=`${Math.min(12,W*0.012)}px Arial`;
+ctx.textAlign='center';ctx.fillText('Mixing Beaker',mx+mw/2,my+mh+16);
+if(d.mixed){ctx.fillStyle='#2a2';ctx.fillText('Reaction Complete!',mx+mw/2,my-8);}
+ctx.textAlign='left';
+// Cabinet
+const cbx=W*0.7,cby=H*0.1,cbw=W*0.2,cbh=H*0.3;
+ctx.fillStyle='#667';ctx.fillRect(cbx,cby,cbw,cbh);
+ctx.strokeStyle='#555';ctx.lineWidth=3;ctx.strokeRect(cbx,cby,cbw,cbh);
+ctx.fillStyle='#888';ctx.fillRect(cbx+cbw/2-2,cby+cbh*0.4,4,cbh*0.2);
+if(d.cabinetOpen){
+ctx.fillStyle='#556';ctx.fillRect(cbx+5,cby+5,cbw-10,cbh-10);
+if(!d.uvLightFound){
+ctx.fillStyle='#a0f';ctx.fillRect(cbx+cbw*0.3,cby+cbh*0.3,cbw*0.4,cbh*0.15);
+ctx.fillStyle='#fff';ctx.font=`${Math.min(11,W*0.011)}px Arial`;
+ctx.textAlign='center';ctx.fillText('UV Light',cbx+cbw/2,cby+cbh*0.42);ctx.textAlign='left';
+}
+}
+// Wall message (UV)
+const umx=W*0.15,umy=H*0.1,umw=W*0.3,umh=H*0.15;
+if(d.uvFound){
+ctx.fillStyle='rgba(150,50,255,0.2)';ctx.fillRect(umx,umy,umw,umh);
+ctx.fillStyle='#a0f';ctx.font=`bold ${Math.min(24,W*0.024)}px monospace`;
+ctx.textAlign='center';ctx.fillText('SAFE CODE: 395',umx+umw/2,umy+umh*0.6);ctx.textAlign='left';
+}else if(inventory.includes('UV Light')){
+ctx.fillStyle='rgba(150,50,255,0.05)';ctx.fillRect(umx,umy,umw,umh);
+ctx.fillStyle='rgba(150,50,255,0.3)';ctx.font=`${Math.min(11,W*0.011)}px Arial`;
+ctx.textAlign='center';ctx.fillText('(Use UV Light here)',umx+umw/2,umy+umh*0.6);ctx.textAlign='left';
+}
+// Safe
+const sx=W*0.72,sy=H*0.5,sw=W*0.15,sh=H*0.18;
+ctx.fillStyle='#444';ctx.fillRect(sx,sy,sw,sh);
+ctx.strokeStyle='#333';ctx.lineWidth=3;ctx.strokeRect(sx,sy,sw,sh);
+ctx.fillStyle='#222';ctx.beginPath();ctx.arc(sx+sw/2,sy+sh*0.35,sw*0.15,0,Math.PI*2);ctx.fill();
+if(d.safeOpen){
+ctx.fillStyle='#2a2';ctx.font=`bold ${Math.min(16,W*0.016)}px Arial`;
+ctx.textAlign='center';ctx.fillText('OPEN!',sx+sw/2,sy+sh*0.8);ctx.textAlign='left';
+}else{
+ctx.fillStyle='#0f0';ctx.font=`${Math.min(14,W*0.014)}px monospace`;
+ctx.textAlign='center';ctx.fillText('_ _ _',sx+sw/2,sy+sh*0.8);ctx.textAlign='left';
+}
+// Door
+const ddx=W*0.02,ddy=H*0.2,ddw=W*0.06,ddh=H*0.45;
+ctx.fillStyle=d.escaped?'#2a8':'#556';ctx.fillRect(ddx,ddy,ddw,ddh);
+ctx.fillStyle='#888';ctx.beginPath();ctx.arc(ddx+ddw*0.75,ddy+ddh*0.5,4,0,Math.PI*2);ctx.fill();
+if(d.safeOpen){
+ctx.fillStyle='#fff';ctx.font=`${Math.min(12,W*0.012)}px Arial`;
+ctx.textAlign='center';ctx.fillText('EXIT',ddx+ddw/2,ddy+ddh/2);ctx.textAlign='left';
+}
+// Instructions
+ctx.fillStyle='#555';ctx.font=`${Math.min(13,W*0.013)}px Arial`;
+ctx.textAlign='center';
+ctx.fillText('Mix chemicals: Red, Blue, Green (in order) then find the safe code',W/2,H*0.62);
+ctx.textAlign='left';
+}
+
+function clickScienceLab(x,y){
+const d=roomData;
+const lx=W*0.1,ly=H*0.45,cw=W*0.06,ch=H*0.15;
+// Chemicals
+if(!d.mixed){
+for(let i=0;i<4;i++){
+const cx=lx+W*0.03+i*W*0.12,cy=ly-ch+H*0.01;
+if(x>cx&&x<cx+cw&&y>cy&&y<cy+ch+16){
+if(i===3){sfxWrong();showMessage('Yellow chemical is unstable! Don\'t use it.');return;}
+const chem=d.chemicals[i];
+if(d.mixOrder.includes(chem)){showMessage(chem+' already added!');return;}
+d.mixOrder.push(chem);sfxClick();
+showMessage('Added '+chem+' to beaker ('+d.mixOrder.length+'/3)');
+if(d.mixOrder.length===3){
+if(JSON.stringify(d.mixOrder)===JSON.stringify(d.correctOrder)){
+d.mixed=true;sfxCorrect();showMessage('Reaction successful! Now find the safe code.');
+}else{
+d.mixOrder=[];sfxWrong();showMessage('Wrong order! The beaker fizzled. Try again.');
+}
+}
+return;
+}
+}
+}
+// Cabinet
+const cbx=W*0.7,cby=H*0.1,cbw=W*0.2,cbh=H*0.3;
+if(x>cbx&&x<cbx+cbw&&y>cby&&y<cby+cbh){
+if(!d.cabinetOpen){d.cabinetOpen=true;sfxClick();showMessage('Cabinet opened!');return;}
+if(!d.uvLightFound&&x>cbx+cbw*0.3&&y>cby+cbh*0.3&&y<cby+cbh*0.5){
+d.uvLightFound=true;inventory.push('UV Light');sfxPickup();showMessage('Picked up UV Light!');return;
+}
+}
+// Wall UV area
+const umx=W*0.15,umy=H*0.1,umw=W*0.3,umh=H*0.15;
+if(x>umx&&x<umx+umw&&y>umy&&y<umy+umh){
+if(inventory.includes('UV Light')&&!d.uvFound){
+d.uvFound=true;sfxCorrect();showMessage('UV reveals: SAFE CODE: 395');return;
+}
+if(!inventory.includes('UV Light')){showMessage('There seems to be something on the wall...');return;}
+}
+// Safe
+const sx=W*0.72,sy=H*0.5,sw=W*0.15,sh=H*0.18;
+if(x>sx&&x<sx+sw&&y>sy&&y<sy+sh){
+if(d.safeOpen){showMessage('Safe is already open!');return;}
+if(!d.mixed){showMessage('Complete the chemical experiment first!');return;}
+const code=prompt('Enter safe code (3 digits):');
+if(code==='395'){d.safeOpen=true;sfxUnlock();showMessage('Safe opened! You found the exit key!');}
+else{sfxWrong();showMessage('Wrong code!');}
+return;
+}
+// Door
+if(x>W*0.02&&x<W*0.08&&y>H*0.2&&y<H*0.65){
+if(d.safeOpen){sfxDoor();completeRoom();return;}
+showMessage('The door is locked. Find a way to open it.');
+}
+}
+
+function hoverScienceLab(x,y){
+const lx=W*0.1,ly=H*0.45,cw=W*0.06,ch=H*0.15;
+if(!roomData.mixed)for(let i=0;i<4;i++){const cx=lx+W*0.03+i*W*0.12,cy=ly-ch+H*0.01;if(x>cx&&x<cx+cw&&y>cy&&y<cy+ch+16)return roomData.chemicals[i]+' Chemical';}
+if(x>W*0.7&&x<W*0.9&&y>H*0.1&&y<H*0.4)return'Cabinet';
+if(x>W*0.15&&x<W*0.45&&y>H*0.1&&y<H*0.25)return'Wall';
+if(x>W*0.72&&x<W*0.87&&y>H*0.5&&y<H*0.68)return'Safe';
+if(x>W*0.02&&x<W*0.08&&y>H*0.2&&y<H*0.65)return'Door';
+return null;
+}
+
+function hintsScienceLab(){
+const d=roomData;
+if(!d.mixed)return'Mix chemicals in order: Red first, then Blue, then Green. Avoid Yellow!';
+if(!d.cabinetOpen)return'Check the cabinet on the right wall for useful tools.';
+if(!d.uvFound)return'Use the UV Light on the wall above the lab bench.';
+if(!d.safeOpen)return'The safe code is 395. Enter it at the safe.';
+return'The safe is open! Click the door to escape.';
+}
+
+// ============ ROOM 3: HAUNTED ATTIC ============
+function initHauntedAttic(){
+roomData={
+notePieces:[false,false,false,false],
+piecesFound:0,noteAssembled:false,
+code:'',correctCode:'1863',
+chestOpen:false,escaped:false,
+flickerTimer:0,flickerOn:true,
+trunkOpen:false,mirrorClicked:false,
+paintingMoved:false,floorboardLifted:false
+};
+}
+
+function drawHauntedAttic(){
+const d=roomData;
+d.flickerTimer+=0.05;
+const flicker=Math.sin(d.flickerTimer*3)>0.3||Math.sin(d.flickerTimer*7)>0.5;
+const bright=flicker?1:0.4;
+// Background
+ctx.fillStyle=`rgb(${Math.floor(42*bright)},${Math.floor(26*bright)},${Math.floor(46*bright)})`;
+ctx.fillRect(0,0,W,H);
+// Floor
+ctx.fillStyle=`rgb(${Math.floor(80*bright)},${Math.floor(50*bright)},${Math.floor(30*bright)})`;
+ctx.fillRect(0,H*0.6,W,H*0.4);
+// Planks
+ctx.strokeStyle=`rgba(0,0,0,${0.3*bright})`;ctx.lineWidth=1;
+for(let i=0;i<12;i++){ctx.beginPath();ctx.moveTo(i*W/12,H*0.6);ctx.lineTo(i*W/12,H);ctx.stroke();}
+// Rafters
+ctx.strokeStyle=`rgb(${Math.floor(60*bright)},${Math.floor(30*bright)},${Math.floor(10*bright)})`;
+ctx.lineWidth=8;
+ctx.beginPath();ctx.moveTo(0,H*0.05);ctx.lineTo(W/2,0);ctx.lineTo(W,H*0.05);ctx.stroke();
+// Old trunk
+const tx=W*0.1,ty=H*0.5,tw=W*0.2,th=H*0.12;
+ctx.fillStyle=`rgb(${Math.floor(90*bright)},${Math.floor(50*bright)},${Math.floor(20*bright)})`;
+ctx.fillRect(tx,ty,tw,th);
+ctx.strokeStyle=`rgb(${Math.floor(60*bright)},${Math.floor(30*bright)},0)`;ctx.lineWidth=3;
+ctx.strokeRect(tx,ty,tw,th);
+ctx.fillStyle=`rgb(${Math.floor(180*bright)},${Math.floor(150*bright)},0)`;
+ctx.fillRect(tx+tw/2-8,ty+th/2-4,16,8);
+if(d.trunkOpen&&!d.notePieces[0]){
+ctx.fillStyle=`rgb(${Math.floor(220*bright)},${Math.floor(200*bright)},${Math.floor(150*bright)})`;
+ctx.fillRect(tx+tw*0.3,ty+th*0.2,tw*0.15,th*0.4);
+ctx.fillStyle=`rgb(${Math.floor(100*bright)},0,0)`;ctx.font=`${Math.min(10,W*0.01)}px Arial`;
+ctx.fillText('#1',tx+tw*0.33,ty+th*0.5);
+}
+// Mirror
+const mx=W*0.7,my=H*0.1,mr=Math.min(W*0.08,H*0.12);
+ctx.beginPath();ctx.ellipse(mx,my+mr,mr*0.7,mr,0,0,Math.PI*2);
+ctx.fillStyle=`rgba(${Math.floor(150*bright)},${Math.floor(150*bright)},${Math.floor(200*bright)},0.6)`;
+ctx.fill();ctx.strokeStyle=`rgb(${Math.floor(140*bright)},${Math.floor(100*bright)},0)`;ctx.lineWidth=4;ctx.stroke();
+if(d.mirrorClicked&&!d.notePieces[1]){
+ctx.fillStyle=`rgb(${Math.floor(220*bright)},${Math.floor(200*bright)},${Math.floor(150*bright)})`;
+ctx.fillRect(mx-10,my+mr+10,20,15);
+ctx.fillStyle=`rgb(${Math.floor(100*bright)},0,0)`;ctx.font=`${Math.min(10,W*0.01)}px Arial`;
+ctx.textAlign='center';ctx.fillText('#2',mx,my+mr+22);ctx.textAlign='left';
+}
+// Old painting
+const ppx=W*0.4,ppy=H*0.08,ppw=W*0.18,pph=H*0.2;
+ctx.fillStyle=`rgb(${Math.floor(100*bright)},${Math.floor(70*bright)},${Math.floor(40*bright)})`;
+ctx.fillRect(ppx,ppy,ppw,pph);
+ctx.fillStyle=`rgb(${Math.floor(50*bright)},${Math.floor(80*bright)},${Math.floor(50*bright)})`;
+ctx.fillRect(ppx+6,ppy+6,ppw-12,pph-12);
+if(!d.paintingMoved){
+ctx.fillStyle=`rgba(${Math.floor(200*bright)},${Math.floor(200*bright)},${Math.floor(200*bright)},0.3)`;
+ctx.font=`${Math.min(11,W*0.011)}px Arial`;ctx.textAlign='center';
+ctx.fillText('Old Painting',ppx+ppw/2,ppy+pph+14);ctx.textAlign='left';
+}else if(!d.notePieces[2]){
+ctx.fillStyle=`rgb(${Math.floor(220*bright)},${Math.floor(200*bright)},${Math.floor(150*bright)})`;
+ctx.fillRect(ppx+ppw*0.4,ppy-15,20,15);
+ctx.fillStyle=`rgb(${Math.floor(100*bright)},0,0)`;ctx.font=`${Math.min(10,W*0.01)}px Arial`;
+ctx.textAlign='center';ctx.fillText('#3',ppx+ppw*0.5,ppy-4);ctx.textAlign='left';
+}
+// Loose floorboard
+const fx=W*0.5,fy=H*0.65,fw=W*0.08,fh=H*0.03;
+if(!d.floorboardLifted){
+ctx.fillStyle=`rgb(${Math.floor(100*bright)},${Math.floor(60*bright)},${Math.floor(25*bright)})`;
+ctx.fillRect(fx,fy,fw,fh);
+ctx.strokeStyle=`rgba(255,255,0,${0.3*bright})`;ctx.lineWidth=1;ctx.strokeRect(fx,fy,fw,fh);
+}else if(!d.notePieces[3]){
+ctx.fillStyle=`rgb(${Math.floor(40*bright)},${Math.floor(20*bright)},${Math.floor(10*bright)})`;
+ctx.fillRect(fx,fy,fw,fh);
+ctx.fillStyle=`rgb(${Math.floor(220*bright)},${Math.floor(200*bright)},${Math.floor(150*bright)})`;
+ctx.fillRect(fx+fw*0.3,fy+2,15,fh-4);
+ctx.fillStyle=`rgb(${Math.floor(100*bright)},0,0)`;ctx.font=`${Math.min(10,W*0.01)}px Arial`;
+ctx.fillText('#4',fx+fw*0.33,fy+fh-4);
+}
+// Note assembly area
+if(d.piecesFound>0){
+ctx.fillStyle=`rgba(${Math.floor(220*bright)},${Math.floor(200*bright)},${Math.floor(150*bright)},0.9)`;
+ctx.fillRect(W*0.3,H*0.38,W*0.4,H*0.18);
+ctx.strokeStyle=`rgb(${Math.floor(100*bright)},${Math.floor(80*bright)},${Math.floor(40*bright)})`;
+ctx.lineWidth=2;ctx.strokeRect(W*0.3,H*0.38,W*0.4,H*0.18);
+ctx.fillStyle=`rgb(${Math.floor(60*bright)},${Math.floor(30*bright)},0)`;
+ctx.font=`${Math.min(14,W*0.014)}px monospace`;ctx.textAlign='center';
+if(d.piecesFound<4){
+ctx.fillText('Note pieces: '+d.piecesFound+'/4 found',W/2,H*0.44);
+ctx.fillText('Find all pieces to read the code',W/2,H*0.5);
+}else if(!d.noteAssembled){
+ctx.fillText('All pieces found! Click to assemble',W/2,H*0.44);
+}else{
+ctx.fillStyle=`rgb(${Math.floor(150*bright)},0,0)`;
+ctx.font=`bold ${Math.min(22,W*0.022)}px monospace`;
+ctx.fillText('THE CODE IS: 1863',W/2,H*0.48);
+}
+ctx.textAlign='left';
+}
+// Chest (exit)
+const chx=W*0.78,chy=H*0.5,chw=W*0.15,chh=H*0.14;
+ctx.fillStyle=`rgb(${Math.floor(120*bright)},${Math.floor(80*bright)},${Math.floor(30*bright)})`;
+ctx.fillRect(chx,chy,chw,chh);
+ctx.strokeStyle=`rgb(${Math.floor(180*bright)},${Math.floor(150*bright)},0)`;ctx.lineWidth=3;
+ctx.strokeRect(chx,chy,chw,chh);
+// Lock on chest
+ctx.fillStyle=`rgb(${Math.floor(180*bright)},${Math.floor(150*bright)},0)`;
+ctx.fillRect(chx+chw/2-12,chy+chh*0.35,24,16);
+ctx.fillStyle=`rgba(0,0,0,0.5)`;ctx.fillRect(chx+chw/2-3,chy+chh*0.4,6,8);
+if(d.chestOpen){
+ctx.fillStyle=`rgb(0,${Math.floor(200*bright)},0)`;ctx.font=`bold ${Math.min(16,W*0.016)}px Arial`;
+ctx.textAlign='center';ctx.fillText('OPEN!',chx+chw/2,chy+chh+16);ctx.textAlign='left';
+}
+ctx.fillStyle=`rgba(${Math.floor(200*bright)},${Math.floor(200*bright)},${Math.floor(200*bright)},0.5)`;
+ctx.font=`${Math.min(11,W*0.011)}px Arial`;ctx.textAlign='center';
+ctx.fillText('Locked Chest',chx+chw/2,chy-6);ctx.textAlign='left';
+// Door behind chest
+if(d.chestOpen){
+const edx=W*0.92,edy=H*0.25,edw=W*0.06,edh=H*0.4;
+ctx.fillStyle=`rgb(0,${Math.floor(170*bright)},${Math.floor(100*bright)})`;
+ctx.fillRect(edx,edy,edw,edh);
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(14,W*0.014)}px Arial`;
+ctx.textAlign='center';ctx.fillText('EXIT',edx+edw/2,edy+edh/2);ctx.textAlign='left';
+}
+}
+
+function clickHauntedAttic(x,y){
+const d=roomData;
+// Trunk
+const tx=W*0.1,ty=H*0.5,tw=W*0.2,th=H*0.12;
+if(x>tx&&x<tx+tw&&y>ty&&y<ty+th){
+if(!d.trunkOpen){d.trunkOpen=true;sfxClick();showMessage('Trunk opened!');return;}
+if(!d.notePieces[0]){d.notePieces[0]=true;d.piecesFound++;sfxPickup();showMessage('Found note piece #1! ('+d.piecesFound+'/4)');return;}
+}
+// Mirror
+const mx=W*0.7,my=H*0.1,mr=Math.min(W*0.08,H*0.12);
+if(Math.hypot(x-mx,y-(my+mr))<mr){
+if(!d.mirrorClicked){d.mirrorClicked=true;sfxClick();showMessage('The mirror swings aside...');return;}
+if(!d.notePieces[1]){d.notePieces[1]=true;d.piecesFound++;sfxPickup();showMessage('Found note piece #2! ('+d.piecesFound+'/4)');return;}
+}
+// Painting
+const ppx=W*0.4,ppy=H*0.08,ppw=W*0.18,pph=H*0.2;
+if(x>ppx&&x<ppx+ppw&&y>ppy&&y<ppy+pph+14){
+if(!d.paintingMoved){d.paintingMoved=true;sfxClick();showMessage('You moved the painting!');return;}
+if(!d.notePieces[2]){d.notePieces[2]=true;d.piecesFound++;sfxPickup();showMessage('Found note piece #3! ('+d.piecesFound+'/4)');return;}
+}
+// Floorboard
+const fx=W*0.5,fy=H*0.65,fw=W*0.08,fh=H*0.03;
+if(x>fx&&x<fx+fw&&y>fy&&y<fy+fh+5){
+if(!d.floorboardLifted){d.floorboardLifted=true;sfxClick();showMessage('Loose floorboard lifted!');return;}
+if(!d.notePieces[3]){d.notePieces[3]=true;d.piecesFound++;sfxPickup();showMessage('Found note piece #4! ('+d.piecesFound+'/4)');return;}
+}
+// Note assembly
+if(d.piecesFound>=4&&!d.noteAssembled&&x>W*0.3&&x<W*0.7&&y>H*0.38&&y<H*0.56){
+d.noteAssembled=true;sfxCorrect();showMessage('The note reads: THE CODE IS 1863');return;
+}
+// Chest
+const chx=W*0.78,chy=H*0.5,chw=W*0.15,chh=H*0.14;
+if(x>chx&&x<chx+chw&&y>chy&&y<chy+chh+16){
+if(!d.noteAssembled){showMessage('The chest needs a 4-digit code. Find all note pieces first!');return;}
+if(d.chestOpen){showMessage('Already open!');return;}
+const code=prompt('Enter the 4-digit code:');
+if(code==='1863'){d.chestOpen=true;sfxUnlock();showMessage('Chest opened! A hidden door is revealed!');}
+else{sfxWrong();showMessage('Wrong code!');}
+return;
+}
+// Exit door
+if(d.chestOpen&&x>W*0.92&&y>H*0.25&&y<H*0.65){sfxDoor();completeRoom();}
+}
+
+function hoverHauntedAttic(x,y){
+const d=roomData;
+if(x>W*0.1&&x<W*0.3&&y>H*0.5&&y<H*0.62)return'Old Trunk';
+const mx=W*0.7,my=H*0.1,mr=Math.min(W*0.08,H*0.12);
+if(Math.hypot(x-mx,y-(my+mr))<mr)return'Mirror';
+if(x>W*0.4&&x<W*0.58&&y>H*0.08&&y<H*0.3)return'Painting';
+if(x>W*0.5&&x<W*0.58&&y>H*0.65&&y<H*0.7)return'Loose Floorboard';
+if(d.piecesFound>=4&&x>W*0.3&&x<W*0.7&&y>H*0.38&&y<H*0.56)return'Note Pieces';
+if(x>W*0.78&&x<W*0.93&&y>H*0.5&&y<H*0.66)return'Locked Chest';
+if(d.chestOpen&&x>W*0.92&&y>H*0.25&&y<H*0.65)return'Exit Door';
+return null;
+}
+
+function hintsHauntedAttic(){
+const d=roomData;
+if(d.piecesFound<4){
+if(!d.trunkOpen)return'Try opening the old trunk on the left.';
+if(!d.mirrorClicked)return'The mirror on the wall looks loose...';
+if(!d.paintingMoved)return'Check behind the old painting.';
+if(!d.floorboardLifted)return'One of the floorboards in the middle looks loose.';
+}
+if(!d.noteAssembled)return'Click the note pieces to assemble them.';
+if(!d.chestOpen)return'The code from the note is 1863. Enter it at the chest.';
+return'Click the exit door to escape!';
+}
+
+// ============ ROOM 4: SPACE STATION ============
+function initSpaceStation(){
+roomData={
+wires:[
+{from:0,to:-1,color:'#e33',correctTo:2},
+{from:1,to:-1,color:'#3e3',correctTo:0},
+{from:2,to:-1,color:'#33e',correctTo:3},
+{from:3,to:-1,color:'#ee3',correctTo:1}
+],
+wiresConnected:false,selectedWire:-1,
+symbols:['triangle','circle','square','star'],
+symbolCode:['star','triangle','circle','square'],
+symbolInput:[],
+symbolsSolved:false,
+panelOpen:false,
+tabletFound:false,
+escaped:false
+};
+}
+
+function drawSpaceStation(){
+const d=roomData;
+// Background - space
+ctx.fillStyle='#0a0a2e';ctx.fillRect(0,0,W,H);
+// Stars
+for(let i=0;i<50;i++){
+const sx=((i*137+43)%1000)/1000*W,sy=((i*271+17)%1000)/1000*H;
+ctx.fillStyle=`rgba(255,255,255,${0.3+Math.sin(performance.now()/1000+i)*0.3})`;
+ctx.fillRect(sx,sy,2,2);
+}
+// Walls (metal)
+ctx.fillStyle='#1a2a3e';ctx.fillRect(W*0.03,H*0.03,W*0.94,H*0.77);
+ctx.strokeStyle='#2a4a6e';ctx.lineWidth=4;ctx.strokeRect(W*0.03,H*0.03,W*0.94,H*0.77);
+// Metal panels
+for(let i=0;i<6;i++){
+ctx.strokeStyle='#1a3a5e';ctx.lineWidth=1;
+ctx.strokeRect(W*0.05+i*W*0.15,H*0.05,W*0.13,H*0.35);
+}
+// Floor
+ctx.fillStyle='#0f1a2e';ctx.fillRect(0,H*0.65,W,H*0.35);
+for(let i=0;i<15;i++){ctx.strokeStyle='#1a2a3e';ctx.lineWidth=1;
+ctx.beginPath();ctx.moveTo(i*W/15,H*0.65);ctx.lineTo(i*W/15,H);ctx.stroke();}
+// Wire panel
+const wpx=W*0.08,wpy=H*0.08,wpw=W*0.35,wph=H*0.45;
+ctx.fillStyle='#0a1a2e';ctx.fillRect(wpx,wpy,wpw,wph);
+ctx.strokeStyle='#3a6a9e';ctx.lineWidth=3;ctx.strokeRect(wpx,wpy,wpw,wph);
+ctx.fillStyle='#8af';ctx.font=`bold ${Math.min(16,W*0.016)}px monospace`;
+ctx.textAlign='center';ctx.fillText('AIRLOCK WIRING',wpx+wpw/2,wpy+20);
+// Left ports
+const portH=wph*0.15;
+for(let i=0;i<4;i++){
+const py=wpy+40+i*(portH+10);
+ctx.fillStyle=d.wires[i].color;ctx.fillRect(wpx+10,py,30,portH);
+ctx.fillStyle='#fff';ctx.font=`${Math.min(11,W*0.011)}px monospace`;
+ctx.fillText(String.fromCharCode(65+i),wpx+25,py+portH/2+4);
+if(d.selectedWire===i){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(wpx+8,py-2,34,portH+4);}
+}
+// Right ports
+const labels=['1','2','3','4'];
+for(let i=0;i<4;i++){
+const py=wpy+40+i*(portH+10);
+ctx.fillStyle='#556';ctx.fillRect(wpx+wpw-40,py,30,portH);
+ctx.fillStyle='#fff';ctx.font=`${Math.min(11,W*0.011)}px monospace`;
+ctx.fillText(labels[i],wpx+wpw-25,py+portH/2+4);
+}
+// Draw connections
+d.wires.forEach((w,i)=>{
+if(w.to>=0){
+const y1=wpy+40+i*(portH+10)+portH/2;
+const y2=wpy+40+w.to*(portH+10)+portH/2;
+ctx.strokeStyle=w.color;ctx.lineWidth=3;ctx.globalAlpha=0.8;
+ctx.beginPath();ctx.moveTo(wpx+40,y1);ctx.lineTo(wpx+wpw-40,y2);ctx.stroke();
+ctx.globalAlpha=1;
+}
+});
+if(d.wiresConnected){
+ctx.fillStyle='#0f0';ctx.font=`bold ${Math.min(14,W*0.014)}px monospace`;
+ctx.fillText('CONNECTED!',wpx+wpw/2,wpy+wph-10);
+}
+ctx.textAlign='left';
+// Symbol decoder panel
+const spx=W*0.5,spy=H*0.08,spw=W*0.4,sph=H*0.45;
+ctx.fillStyle='#0a1a2e';ctx.fillRect(spx,spy,spw,sph);
+ctx.strokeStyle='#3a6a9e';ctx.lineWidth=3;ctx.strokeRect(spx,spy,spw,sph);
+ctx.fillStyle='#8af';ctx.font=`bold ${Math.min(16,W*0.016)}px monospace`;
+ctx.textAlign='center';ctx.fillText('SYMBOL DECODER',spx+spw/2,spy+20);
+// Reference (if tablet found)
+if(d.tabletFound){
+ctx.fillStyle='#5a8';ctx.font=`${Math.min(12,W*0.012)}px monospace`;
+ctx.fillText('Tablet: Star=1 Triangle=2 Circle=3 Square=4',spx+spw/2,spy+38);
+ctx.fillText('Enter sequence: 1, 2, 3, 4',spx+spw/2,spy+54);
+}
+// Symbol buttons
+const symSize=Math.min(spw*0.18,sph*0.25);
+const symNames=['triangle','circle','square','star'];
+const symLabels=['\u25B3','\u25CB','\u25A1','\u2606'];
+for(let i=0;i<4;i++){
+const bx=spx+spw*0.1+i*(symSize+spw*0.05),by_=spy+sph*0.35;
+ctx.fillStyle='#1a2a4e';ctx.fillRect(bx,by_,symSize,symSize);
+ctx.strokeStyle='#4a7abe';ctx.lineWidth=2;ctx.strokeRect(bx,by_,symSize,symSize);
+ctx.fillStyle='#adf';ctx.font=`${Math.min(30,symSize*0.6)}px Arial`;
+ctx.textAlign='center';ctx.fillText(symLabels[i],bx+symSize/2,by_+symSize*0.65);
+}
+// Input display
+ctx.fillStyle='#0a0a1e';ctx.fillRect(spx+spw*0.1,spy+sph*0.72,spw*0.8,sph*0.15);
+const dispLabels=['\u2606','\u25B3','\u25CB','\u25A1'];
+ctx.fillStyle='#adf';ctx.font=`${Math.min(18,W*0.018)}px Arial`;
+let inputStr=d.symbolInput.map(s=>{const idx=symNames.indexOf(s);return idx>=0?symLabels[idx]:'?';}).join(' ');
+ctx.fillText(inputStr||'Click symbols...',spx+spw/2,spy+sph*0.82);
+if(d.symbolsSolved){ctx.fillStyle='#0f0';ctx.fillText('DECODED!',spx+spw/2,spy+sph*0.95);}
+ctx.textAlign='left';
+// Tablet on floor
+if(!d.tabletFound){
+ctx.fillStyle='#334';ctx.fillRect(W*0.55,H*0.6,W*0.06,H*0.04);
+ctx.fillStyle='#4af';ctx.font=`${Math.min(10,W*0.01)}px Arial`;
+ctx.textAlign='center';ctx.fillText('tablet',W*0.58,H*0.67);ctx.textAlign='left';
+}
+// Airlock door
+const adx=W*0.42,ady=H*0.15,adw=W*0.06,adh=H*0.5;
+ctx.fillStyle=(d.wiresConnected&&d.symbolsSolved)?'#2a8':'#334';
+ctx.fillRect(adx,ady,adw,adh);
+ctx.strokeStyle='#4a6a8e';ctx.lineWidth=3;ctx.strokeRect(adx,ady,adw,adh);
+if(d.wiresConnected&&d.symbolsSolved){
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(14,W*0.014)}px Arial`;
+ctx.textAlign='center';ctx.fillText('EXIT',adx+adw/2,ady+adh/2);ctx.textAlign='left';
+}else{
+ctx.fillStyle='#a33';ctx.font=`${Math.min(11,W*0.011)}px Arial`;
+ctx.textAlign='center';ctx.fillText('LOCKED',adx+adw/2,ady+adh/2);ctx.textAlign='left';
+}
+}
+
+function clickSpaceStation(x,y){
+const d=roomData;
+const wpx=W*0.08,wpy=H*0.08,wpw=W*0.35,wph=H*0.45;
+const portH=wph*0.15;
+// Left wire ports
+if(!d.wiresConnected){
+for(let i=0;i<4;i++){
+const py=wpy+40+i*(portH+10);
+if(x>wpx+10&&x<wpx+40&&y>py&&y<py+portH){
+d.selectedWire=i;sfxClick();showMessage('Wire '+String.fromCharCode(65+i)+' selected. Click a right port.');return;
+}
+}
+// Right wire ports
+if(d.selectedWire>=0){
+for(let i=0;i<4;i++){
+const py=wpy+40+i*(portH+10);
+if(x>wpx+wpw-40&&x<wpx+wpw-10&&y>py&&y<py+portH){
+d.wires[d.selectedWire].to=i;sfxClick();
+showMessage('Connected wire '+String.fromCharCode(65+d.selectedWire)+' to port '+(i+1));
+d.selectedWire=-1;
+// Check all connected
+if(d.wires.every(w=>w.to>=0)){
+if(d.wires.every(w=>w.to===w.correctTo)){
+d.wiresConnected=true;sfxCorrect();showMessage('Wires connected correctly!');
+}else{
+sfxWrong();showMessage('Wrong connections! Resetting...');
+setTimeout(()=>{d.wires.forEach(w=>w.to=-1);},500);
+}
+}
+return;
+}
+}
+}
+}
+// Symbol buttons
+const spx=W*0.5,spy=H*0.08,spw=W*0.4,sph=H*0.45;
+const symSize=Math.min(spw*0.18,sph*0.25);
+const symNames=['triangle','circle','square','star'];
+if(!d.symbolsSolved){
+for(let i=0;i<4;i++){
+const bx=spx+spw*0.1+i*(symSize+spw*0.05),by_=spy+sph*0.35;
+if(x>bx&&x<bx+symSize&&y>by_&&y<by_+symSize){
+d.symbolInput.push(symNames[i]);sfxClick();
+if(d.symbolInput.length===4){
+if(JSON.stringify(d.symbolInput)===JSON.stringify(d.symbolCode)){
+d.symbolsSolved=true;sfxCorrect();showMessage('Symbols decoded!');
+}else{
+sfxWrong();showMessage('Wrong sequence! Try: Star, Triangle, Circle, Square');
+d.symbolInput=[];
+}
+}
+return;
+}
+}
+// Clear input
+if(x>spx+spw*0.1&&x<spx+spw*0.9&&y>spy+sph*0.72&&y<spy+sph*0.87){
+d.symbolInput=[];sfxClick();showMessage('Input cleared');return;
+}
+}
+// Tablet
+if(!d.tabletFound&&x>W*0.55&&x<W*0.61&&y>H*0.58&&y<H*0.68){
+d.tabletFound=true;sfxPickup();showMessage('Found alien translation tablet!');return;
+}
+// Airlock door
+const adx=W*0.42,ady=H*0.15,adw=W*0.06,adh=H*0.5;
+if(x>adx&&x<adx+adw&&y>ady&&y<ady+adh){
+if(d.wiresConnected&&d.symbolsSolved){sfxDoor();completeRoom();}
+else showMessage('Airlock locked. Fix wiring and decode symbols.');
+}
+}
+
+function hoverSpaceStation(x,y){
+const d=roomData,wpx=W*0.08,wpy=H*0.08,wpw=W*0.35,wph=H*0.45,portH=wph*0.15;
+for(let i=0;i<4;i++){const py=wpy+40+i*(portH+10);if(x>wpx+10&&x<wpx+40&&y>py&&y<py+portH)return'Wire '+String.fromCharCode(65+i);}
+for(let i=0;i<4;i++){const py=wpy+40+i*(portH+10);if(x>wpx+wpw-40&&x<wpx+wpw-10&&y>py&&y<py+portH)return'Port '+(i+1);}
+const spx=W*0.5,spy=H*0.08,spw=W*0.4,sph=H*0.45,symSize=Math.min(spw*0.18,sph*0.25);
+for(let i=0;i<4;i++){const bx=spx+spw*0.1+i*(symSize+spw*0.05),by_=spy+sph*0.35;if(x>bx&&x<bx+symSize&&y>by_&&y<by_+symSize)return['Triangle','Circle','Square','Star'][i];}
+if(!d.tabletFound&&x>W*0.55&&x<W*0.61&&y>H*0.58&&y<H*0.68)return'Tablet';
+if(x>W*0.42&&x<W*0.48&&y>H*0.15&&y<H*0.65)return'Airlock Door';
+return null;
+}
+
+function hintsSpaceStation(){
+const d=roomData;
+if(!d.tabletFound)return'There\'s a tablet on the floor with alien translations.';
+if(!d.wiresConnected)return'Wire A->3, B->1, C->4, D->2. (Red to 3, Green to 1, Blue to 4, Yellow to 2)';
+if(!d.symbolsSolved)return'The symbol sequence is: Star, Triangle, Circle, Square.';
+return'Both puzzles solved! Click the airlock door to escape.';
+}
+
+// ============ ROOM 5: PIRATE SHIP ============
+function initPirateShip(){
+roomData={
+mapFound:false,compassSolved:false,
+compassDir:['N','E','S','W'],
+compassInput:[],correctCompass:['N','W','S','E','N'],
+chestFound:false,keyFound:false,
+cannonMoved:false,
+barrelChecked:false,
+flagPulled:false,
+doorUnlocked:false,
+clueStep:0,
+mapClue:'Follow the compass: North, West, South, East, North'
+};
+}
+
+function drawPirateShip(){
+const d=roomData;
+// Sky
+const skyGrad=ctx.createLinearGradient(0,0,0,H*0.3);
+skyGrad.addColorStop(0,'#1a3a5e');skyGrad.addColorStop(1,'#3a6a9e');
+ctx.fillStyle=skyGrad;ctx.fillRect(0,0,W,H*0.3);
+// Ship deck
+ctx.fillStyle='#6b4a1a';ctx.fillRect(0,H*0.3,W,H*0.7);
+// Planks
+ctx.strokeStyle='#5a3a0a';ctx.lineWidth=1;
+for(let i=0;i<20;i++){ctx.beginPath();ctx.moveTo(0,H*0.3+i*H*0.035);ctx.lineTo(W,H*0.3+i*H*0.035);ctx.stroke();}
+// Railing
+ctx.fillStyle='#4a2a0a';ctx.fillRect(0,H*0.28,W,H*0.04);
+for(let i=0;i<12;i++){ctx.fillRect(i*W/12+W/24,H*0.2,W*0.015,H*0.1);}
+// Mast
+ctx.fillStyle='#5a3a0a';ctx.fillRect(W*0.48,H*0.0,W*0.03,H*0.35);
+// Flag
+ctx.fillStyle='#111';ctx.fillRect(W*0.51,H*0.02,W*0.1,H*0.07);
+ctx.fillStyle='#fff';ctx.font=`${Math.min(20,W*0.02)}px Arial`;
+ctx.textAlign='center';ctx.fillText('\u2620',W*0.56,H*0.065);ctx.textAlign='left';
+if(!d.flagPulled){
+ctx.fillStyle='rgba(255,255,255,0.4)';ctx.font=`${Math.min(10,W*0.01)}px Arial`;
+ctx.textAlign='center';ctx.fillText('pull flag',W*0.56,H*0.1);ctx.textAlign='left';
+}
+// Barrel
+const brx=W*0.12,bry=H*0.45,brw=W*0.08,brh=H*0.12;
+ctx.fillStyle='#8B6914';
+ctx.beginPath();ctx.ellipse(brx+brw/2,bry+brh/2,brw/2,brh/2,0,0,Math.PI*2);ctx.fill();
+ctx.strokeStyle='#555';ctx.lineWidth=3;
+ctx.beginPath();ctx.ellipse(brx+brw/2,bry+brh/2,brw/2,brh/2,0,0,Math.PI*2);ctx.stroke();
+ctx.strokeStyle='#888';ctx.lineWidth=2;
+ctx.beginPath();ctx.ellipse(brx+brw/2,bry+brh*0.3,brw/2,2,0,0,Math.PI*2);ctx.stroke();
+ctx.beginPath();ctx.ellipse(brx+brw/2,bry+brh*0.7,brw/2,2,0,0,Math.PI*2);ctx.stroke();
+if(d.barrelChecked&&d.mapFound===false){
+// nothing extra
+}
+// Map on table
+const tbx=W*0.3,tby=H*0.42,tbw=W*0.25,tbh=H*0.06;
+ctx.fillStyle='#5a3a1a';ctx.fillRect(tbx,tby,tbw,tbh);
+// Table legs
+ctx.fillRect(tbx+W*0.02,tby+tbh,W*0.015,H*0.1);
+ctx.fillRect(tbx+tbw-W*0.035,tby+tbh,W*0.015,H*0.1);
+if(!d.mapFound){
+ctx.fillStyle='#d4b87a';ctx.fillRect(tbx+tbw*0.3,tby-H*0.01,tbw*0.4,tbh*0.8);
+ctx.fillStyle='#6a4a2a';ctx.font=`${Math.min(10,W*0.01)}px Arial`;
+ctx.textAlign='center';ctx.fillText('old map',tbx+tbw*0.5,tby+tbh*0.3);ctx.textAlign='left';
+}
+// Map display if found
+if(d.mapFound){
+ctx.fillStyle='rgba(210,180,120,0.95)';ctx.fillRect(W*0.2,H*0.05,W*0.25,H*0.2);
+ctx.strokeStyle='#6a4a2a';ctx.lineWidth=3;ctx.strokeRect(W*0.2,H*0.05,W*0.25,H*0.2);
+ctx.fillStyle='#4a2a0a';ctx.font=`bold ${Math.min(14,W*0.014)}px serif`;
+ctx.textAlign='center';ctx.fillText('TREASURE MAP',W*0.325,H*0.1);
+ctx.font=`${Math.min(12,W*0.012)}px serif`;
+ctx.fillText('Follow the compass:',W*0.325,H*0.14);
+ctx.fillText('North, West, South, East, North',W*0.325,H*0.18);
+ctx.fillText('Then find the captain\'s key',W*0.325,H*0.22);
+ctx.textAlign='left';
+}
+// Compass
+const cx=W*0.65,cy=H*0.18,cr=Math.min(W*0.08,H*0.12);
+ctx.beginPath();ctx.arc(cx,cy,cr,0,Math.PI*2);ctx.fillStyle='#d4b87a';ctx.fill();
+ctx.strokeStyle='#6a4a2a';ctx.lineWidth=3;ctx.stroke();
+// Compass directions
+const dirs=['N','E','S','W'];
+const angles=[-Math.PI/2,0,Math.PI/2,Math.PI];
+ctx.font=`bold ${Math.min(18,cr*0.4)}px serif`;ctx.textAlign='center';
+for(let i=0;i<4;i++){
+const ax=cx+Math.cos(angles[i])*cr*0.7,ay=cy+Math.sin(angles[i])*cr*0.7;
+ctx.fillStyle=(d.compassInput.length>0&&d.compassInput[d.compassInput.length-1]===dirs[i])?'#e33':'#4a2a0a';
+ctx.fillText(dirs[i],ax,ay+6);
+}
+// Compass needle
+ctx.strokeStyle='#e33';ctx.lineWidth=2;
+ctx.beginPath();ctx.moveTo(cx,cy-cr*0.4);ctx.lineTo(cx,cy+cr*0.4);ctx.stroke();
+ctx.beginPath();ctx.moveTo(cx-cr*0.4,cy);ctx.lineTo(cx+cr*0.4,cy);ctx.stroke();
+// Compass progress
+if(d.compassInput.length>0&&!d.compassSolved){
+ctx.fillStyle='#4a2a0a';ctx.font=`${Math.min(12,W*0.012)}px serif`;
+ctx.fillText(d.compassInput.join(' > ')+' ('+d.compassInput.length+'/5)',cx,cy+cr+20);
+}
+if(d.compassSolved){
+ctx.fillStyle='#2a2';ctx.font=`bold ${Math.min(14,W*0.014)}px serif`;
+ctx.fillText('Compass Solved!',cx,cy+cr+20);
+}
+ctx.textAlign='left';
+// Cannon
+const cnx=W*0.78,cny=H*0.48,cnw=W*0.12,cnh=H*0.08;
+ctx.fillStyle='#333';ctx.fillRect(cnx,cny,cnw,cnh);
+ctx.fillStyle='#222';ctx.beginPath();ctx.arc(cnx+cnw,cny+cnh/2,cnh*0.4,0,Math.PI*2);ctx.fill();
+ctx.fillStyle='#444';
+ctx.beginPath();ctx.arc(cnx+W*0.02,cny+cnh+5,8,0,Math.PI*2);ctx.fill();
+ctx.beginPath();ctx.arc(cnx+cnw-W*0.02,cny+cnh+5,8,0,Math.PI*2);ctx.fill();
+if(d.cannonMoved&&!d.keyFound){
+ctx.fillStyle='#cc0';ctx.font=`${Math.min(18,W*0.018)}px Arial`;
+ctx.textAlign='center';ctx.fillText('\uD83D\uDD11',cnx+cnw/2,cny+cnh+30);
+ctx.font=`${Math.min(10,W*0.01)}px Arial`;
+ctx.fillText('Captain\'s Key',cnx+cnw/2,cny+cnh+44);ctx.textAlign='left';
+}
+// Captain's door
+const ddx=W*0.88,ddy=H*0.2,ddw=W*0.08,ddh=H*0.4;
+ctx.fillStyle=d.doorUnlocked?'#2a8':'#4a2a0a';ctx.fillRect(ddx,ddy,ddw,ddh);
+ctx.strokeStyle='#6a4a2a';ctx.lineWidth=3;ctx.strokeRect(ddx,ddy,ddw,ddh);
+ctx.fillStyle='#c8a060';ctx.beginPath();ctx.arc(ddx+ddw*0.8,ddy+ddh*0.5,5,0,Math.PI*2);ctx.fill();
+if(d.doorUnlocked){
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(14,W*0.014)}px serif`;
+ctx.textAlign='center';ctx.fillText('EXIT',ddx+ddw/2,ddy+ddh/2);ctx.textAlign='left';
+}else{
+ctx.fillStyle='#c8a060';ctx.font=`${Math.min(11,W*0.011)}px serif`;
+ctx.textAlign='center';ctx.fillText('Captain\'s',ddx+ddw/2,ddy+ddh*0.4);
+ctx.fillText('Cabin',ddx+ddw/2,ddy+ddh*0.55);ctx.textAlign='left';
+}
+}
+
+function clickPirateShip(x,y){
+const d=roomData;
+// Flag
+if(!d.flagPulled&&x>W*0.51&&x<W*0.61&&y>H*0.02&&y<H*0.1){
+d.flagPulled=true;sfxClick();showMessage('A note falls from the flag: "The key is under the cannon"');return;
+}
+// Barrel
+const brx=W*0.12,bry=H*0.45,brw=W*0.08,brh=H*0.12;
+if(x>brx&&x<brx+brw&&y>bry&&y<bry+brh){
+if(!d.barrelChecked){d.barrelChecked=true;sfxClick();showMessage('The barrel is full of grog. Nothing useful here.');return;}
+}
+// Map
+const tbx=W*0.3,tby=H*0.42,tbw=W*0.25,tbh=H*0.06;
+if(!d.mapFound&&x>tbx+tbw*0.3&&x<tbx+tbw*0.7&&y>tby-H*0.01&&y<tby+tbh){
+d.mapFound=true;sfxPickup();showMessage('Found the treasure map!');return;
+}
+// Compass
+const cx=W*0.65,cy=H*0.18,cr=Math.min(W*0.08,H*0.12);
+if(!d.compassSolved&&d.mapFound){
+const dirs=['N','E','S','W'];
+const angles=[-Math.PI/2,0,Math.PI/2,Math.PI];
+for(let i=0;i<4;i++){
+const ax=cx+Math.cos(angles[i])*cr*0.7,ay=cy+Math.sin(angles[i])*cr*0.7;
+if(Math.hypot(x-ax,y-ay)<cr*0.3){
+d.compassInput.push(dirs[i]);sfxClick();
+if(d.compassInput.length===5){
+if(JSON.stringify(d.compassInput)===JSON.stringify(d.correctCompass)){
+d.compassSolved=true;sfxCorrect();showMessage('Compass puzzle solved!');
+}else{
+sfxWrong();showMessage('Wrong sequence! Try again: N, W, S, E, N');
+d.compassInput=[];
+}
+}
+return;
+}
+}
+}
+// Cannon
+const cnx=W*0.78,cny=H*0.48,cnw=W*0.12,cnh=H*0.08;
+if(x>cnx&&x<cnx+cnw&&y>cny&&y<cny+cnh+10){
+if(!d.cannonMoved&&d.compassSolved){d.cannonMoved=true;sfxClick();showMessage('You pushed the cannon aside and found a key!');return;}
+if(!d.compassSolved){showMessage('The cannon is too heavy. Solve the compass puzzle first.');return;}
+}
+// Key pickup
+if(d.cannonMoved&&!d.keyFound&&x>W*0.78&&x<W*0.9&&y>H*0.56&&y<H*0.64){
+d.keyFound=true;inventory.push('Captain Key');sfxPickup();showMessage('Picked up the Captain\'s Key!');return;
+}
+// Door
+const ddx=W*0.88,ddy=H*0.2,ddw=W*0.08,ddh=H*0.4;
+if(x>ddx&&x<ddx+ddw&&y>ddy&&y<ddy+ddh){
+if(d.doorUnlocked){sfxDoor();completeRoom();return;}
+if(d.keyFound||inventory.includes('Captain Key')){
+d.doorUnlocked=true;sfxUnlock();showMessage('Door unlocked with the Captain\'s Key! Click to escape!');return;
+}
+showMessage('The door is locked. You need the Captain\'s Key.');
+}
+}
+
+function hoverPirateShip(x,y){
+const d=roomData;
+if(!d.flagPulled&&x>W*0.51&&x<W*0.61&&y>H*0.02&&y<H*0.1)return'Flag';
+if(x>W*0.12&&x<W*0.2&&y>H*0.45&&y<H*0.57)return'Barrel';
+if(!d.mapFound&&x>W*0.39&&x<W*0.45&&y>H*0.41&&y<H*0.48)return'Old Map';
+const cx=W*0.65,cy=H*0.18,cr=Math.min(W*0.08,H*0.12);
+if(Math.hypot(x-cx,y-cy)<cr)return'Compass';
+if(x>W*0.78&&x<W*0.9&&y>H*0.48&&y<H*0.58)return'Cannon';
+if(d.cannonMoved&&!d.keyFound&&x>W*0.78&&x<W*0.9&&y>H*0.56&&y<H*0.64)return'Captain\'s Key';
+if(x>W*0.88&&x<W*0.96&&y>H*0.2&&y<H*0.6)return'Captain\'s Door';
+return null;
+}
+
+function hintsPirateShip(){
+const d=roomData;
+if(!d.mapFound)return'Pick up the old map from the table.';
+if(!d.compassSolved)return'Follow the map compass directions: North, West, South, East, North.';
+if(!d.cannonMoved)return'The flag says the key is under the cannon. Push the cannon.';
+if(!d.keyFound)return'Pick up the Captain\'s Key from under the cannon.';
+if(!d.doorUnlocked)return'Use the Captain\'s Key on the cabin door.';
+return'Click the door to escape!';
+}
+
+// ============ DRAW/UPDATE DISPATCH ============
+function drawRoom(){
+switch(currentRoom){
+case 0:drawClassroom();break;
+case 1:drawScienceLab();break;
+case 2:drawHauntedAttic();break;
+case 3:drawSpaceStation();break;
+case 4:drawPirateShip();break;
+}
+}
+function clickRoom(x,y){
+switch(currentRoom){
+case 0:clickClassroom(x,y);break;
+case 1:clickScienceLab(x,y);break;
+case 2:clickHauntedAttic(x,y);break;
+case 3:clickSpaceStation(x,y);break;
+case 4:clickPirateShip(x,y);break;
+}
+}
+function hoverRoom(x,y){
+switch(currentRoom){
+case 0:return hoverClassroom(x,y);
+case 1:return hoverScienceLab(x,y);
+case 2:return hoverHauntedAttic(x,y);
+case 3:return hoverSpaceStation(x,y);
+case 4:return hoverPirateShip(x,y);
+}
+return null;
+}
+function getHint(){
+switch(currentRoom){
+case 0:return hintsClassroom();
+case 1:return hintsScienceLab();
+case 2:return hintsHauntedAttic();
+case 3:return hintsSpaceStation();
+case 4:return hintsPirateShip();
+}
+return '';
+}
+
+// ============ UI ELEMENTS ============
+function drawInventory(){
+const barH=H*0.12,barY=H-barH;
+ctx.fillStyle='rgba(0,0,0,0.85)';ctx.fillRect(0,barY,W,barH);
+ctx.strokeStyle='#555';ctx.lineWidth=2;
+ctx.beginPath();ctx.moveTo(0,barY);ctx.lineTo(W,barY);ctx.stroke();
+const slotSize=Math.min(barH*0.7,W/10);
+const startX=W*0.15;
+for(let i=0;i<8;i++){
+const sx=startX+i*(slotSize+8),sy=barY+(barH-slotSize)/2;
+ctx.fillStyle=i===selectedItem?'rgba(100,200,100,0.3)':'rgba(50,50,50,0.5)';
+ctx.fillRect(sx,sy,slotSize,slotSize);
+ctx.strokeStyle=i===selectedItem?'#5a5':'#444';ctx.lineWidth=2;
+ctx.strokeRect(sx,sy,slotSize,slotSize);
+if(i<inventory.length){
+ctx.fillStyle='#ddd';ctx.font=`${Math.min(11,slotSize*0.25)}px Arial`;
+ctx.textAlign='center';ctx.fillText(inventory[i],sx+slotSize/2,sy+slotSize/2+4);ctx.textAlign='left';
+}
+}
+// Hint button
+const hbx=W*0.02,hby=barY+(barH-slotSize)/2,hbw=W*0.1,hbh=slotSize;
+ctx.fillStyle=hints>0?'#2a5a8a':'#333';
+ctx.fillRect(hbx,hby,hbw,hbh);
+ctx.strokeStyle='#4a8abe';ctx.lineWidth=2;ctx.strokeRect(hbx,hby,hbw,hbh);
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(14,hbw*0.2)}px Arial`;
+ctx.textAlign='center';ctx.fillText('HINT ('+hints+')',hbx+hbw/2,hby+hbh/2+5);ctx.textAlign='left';
+}
+
+function drawTimer(){
+const t=Math.floor(timer);
+const mins=Math.floor(t/60);
+const secs=t%60;
+const timeStr=mins+':'+(secs<10?'0':'')+secs;
+ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(W-120,5,115,30);
+ctx.fillStyle='#fff';ctx.font='bold 18px monospace';
+ctx.textAlign='right';ctx.fillText(timeStr,W-15,26);ctx.textAlign='left';
+}
+
+function drawMessage(){
+if(messageTimer>0){
+ctx.fillStyle='rgba(0,0,0,0.8)';
+const mw=Math.min(W*0.6,500),mh=40;
+ctx.fillRect(W/2-mw/2,H*0.78-mh/2,mw,mh);
+ctx.strokeStyle='#888';ctx.lineWidth=1;ctx.strokeRect(W/2-mw/2,H*0.78-mh/2,mw,mh);
+ctx.fillStyle='#fff';ctx.font=`${Math.min(15,W*0.015)}px Arial`;
+ctx.textAlign='center';ctx.fillText(message,W/2,H*0.78+5);ctx.textAlign='left';
+}
+if(hintTimer>0){
+ctx.fillStyle='rgba(30,60,100,0.9)';
+const mw=Math.min(W*0.7,600),mh=50;
+ctx.fillRect(W/2-mw/2,H*0.7-mh/2,mw,mh);
+ctx.strokeStyle='#4a8abe';ctx.lineWidth=2;ctx.strokeRect(W/2-mw/2,H*0.7-mh/2,mw,mh);
+ctx.fillStyle='#adf';ctx.font=`${Math.min(14,W*0.014)}px Arial`;
+ctx.textAlign='center';ctx.fillText('HINT: '+hintText,W/2,H*0.7+5);ctx.textAlign='left';
+}
+}
+
+function drawRoomTitle(){
+ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(5,5,260,30);
+ctx.fillStyle='#fff';ctx.font='bold 16px Arial';
+ctx.fillText('Room '+(currentRoom+1)+': '+roomDefs[currentRoom].name,15,25);
+// Back to menu
+ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(5,40,80,25);
+ctx.fillStyle='#aaa';ctx.font='12px Arial';ctx.fillText('\u2190 Menu',15,57);
+}
+
+function drawClickAnims(){
+clickAnim=clickAnim.filter(a=>{
+a.t+=0.05;
+ctx.strokeStyle=`rgba(255,255,255,${1-a.t})`;
+ctx.lineWidth=2;ctx.beginPath();ctx.arc(a.x,a.y,a.t*20,0,Math.PI*2);ctx.stroke();
+return a.t<1;
+});
+}
+
+// ============ MENU ============
+function drawMenu(){
+backLink.style.display='block';
+// Background
+const grad=ctx.createLinearGradient(0,0,0,H);
+grad.addColorStop(0,'#1a0a2e');grad.addColorStop(0.5,'#2a1a3e');grad.addColorStop(1,'#0a0a1e');
+ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+// Decorative elements
+for(let i=0;i<30;i++){
+const sx=((i*173+91)%1000)/1000*W,sy=((i*311+47)%1000)/1000*H;
+ctx.fillStyle=`rgba(255,255,255,${0.1+Math.sin(performance.now()/2000+i)*0.1})`;
+ctx.fillRect(sx,sy,2,2);
+}
+// Title
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(48,W*0.05)}px 'Segoe UI', Arial`;
+ctx.textAlign='center';ctx.fillText('ESCAPE ROOM',W/2,H*0.12);
+ctx.fillStyle='#8af';ctx.font=`${Math.min(20,W*0.02)}px 'Segoe UI', Arial`;
+ctx.fillText("Jake's Arcade",W/2,H*0.17);
+ctx.fillStyle='#888';ctx.font=`${Math.min(16,W*0.016)}px Arial`;
+ctx.fillText('Can you escape all 5 rooms?',W/2,H*0.22);
+// Room cards
+const cardW=Math.min(W*0.8,700),cardH=H*0.11;
+const startY=H*0.28;
+menuHover=-1;
+for(let i=0;i<5;i++){
+const cy=startY+i*(cardH+H*0.02);
+const isHover=mouseX>W/2-cardW/2&&mouseX<W/2+cardW/2&&mouseY>cy&&mouseY<cy+cardH;
+if(isHover)menuHover=i;
+const done=roomCompleted['room'+i];
+ctx.fillStyle=isHover?'rgba(60,40,80,0.9)':'rgba(30,20,50,0.8)';
+ctx.fillRect(W/2-cardW/2,cy,cardW,cardH);
+ctx.strokeStyle=done?'#2a2':roomDefs[i].colors[1];
+ctx.lineWidth=isHover?3:2;
+ctx.strokeRect(W/2-cardW/2,cy,cardW,cardH);
+// Difficulty badge
+const diffColors={'Easy':'#4a4','Medium':'#ca4','Hard':'#c44'};
+ctx.fillStyle=diffColors[roomDefs[i].difficulty]||'#888';
+ctx.fillRect(W/2-cardW/2+10,cy+8,60,20);
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(12,W*0.012)}px Arial`;
+ctx.textAlign='center';ctx.fillText(roomDefs[i].difficulty,W/2-cardW/2+40,cy+22);
+// Room name
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(20,W*0.02)}px Arial`;
+ctx.textAlign='left';ctx.fillText('Room '+(i+1)+': '+roomDefs[i].name,W/2-cardW/2+80,cy+24);
+// Description
+ctx.fillStyle='#aaa';ctx.font=`${Math.min(13,W*0.013)}px Arial`;
+ctx.fillText(roomDefs[i].desc,W/2-cardW/2+80,cy+cardH-14);
+// Status
+ctx.textAlign='right';
+if(done){
+ctx.fillStyle='#2a2';ctx.font=`bold ${Math.min(14,W*0.014)}px Arial`;
+ctx.fillText('COMPLETED',W/2+cardW/2-15,cy+22);
+if(bestTimes['room'+i]){
+const bt=Math.floor(bestTimes['room'+i]);
+const m=Math.floor(bt/60),s=bt%60;
+ctx.fillStyle='#8af';ctx.font=`${Math.min(12,W*0.012)}px monospace`;
+ctx.fillText('Best: '+m+':'+(s<10?'0':'')+s,W/2+cardW/2-15,cy+cardH-14);
+}
+}else{
+ctx.fillStyle='#888';ctx.font=`${Math.min(13,W*0.013)}px Arial`;
+ctx.fillText('Not completed',W/2+cardW/2-15,cy+22);
+}
+ctx.textAlign='left';
+}
+// Reset button
+const rbx=W/2-50,rby=H*0.92,rbw=100,rbh=30;
+const rbHover=mouseX>rbx&&mouseX<rbx+rbw&&mouseY>rby&&mouseY<rby+rbh;
+menuBtnHover=rbHover?'reset':'';
+ctx.fillStyle=rbHover?'rgba(150,50,50,0.8)':'rgba(80,30,30,0.6)';
+ctx.fillRect(rbx,rby,rbw,rbh);
+ctx.strokeStyle='#a44';ctx.lineWidth=1;ctx.strokeRect(rbx,rby,rbw,rbh);
+ctx.fillStyle='#caa';ctx.font=`${Math.min(13,W*0.013)}px Arial`;
+ctx.textAlign='center';ctx.fillText('Reset Data',W/2,rby+20);ctx.textAlign='left';
+}
+
+function drawRoomComplete(){
+const grad=ctx.createLinearGradient(0,0,0,H);
+grad.addColorStop(0,'#0a2a0a');grad.addColorStop(1,'#1a4a1a');
+ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+// Particles
+for(let i=0;i<20;i++){
+const t=performance.now()/1000;
+const px=W/2+Math.sin(t*2+i*0.7)*W*0.3,py=H*0.3+Math.cos(t*1.5+i*1.1)*H*0.2;
+ctx.fillStyle=`rgba(255,215,0,${0.3+Math.sin(t+i)*0.2})`;
+ctx.beginPath();ctx.arc(px,py,3+Math.sin(t+i)*2,0,Math.PI*2);ctx.fill();
+}
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(42,W*0.042)}px Arial`;
+ctx.textAlign='center';ctx.fillText('ROOM ESCAPED!',W/2,H*0.25);
+ctx.fillStyle='#4f4';ctx.font=`${Math.min(24,W*0.024)}px Arial`;
+ctx.fillText(roomDefs[currentRoom].name,W/2,H*0.35);
+const t=Math.floor(completionTime);
+const m=Math.floor(t/60),s=t%60;
+ctx.fillStyle='#fff';ctx.font=`${Math.min(28,W*0.028)}px monospace`;
+ctx.fillText('Time: '+m+':'+(s<10?'0':'')+s,W/2,H*0.45);
+const bt=bestTimes['room'+currentRoom]?Math.floor(bestTimes['room'+currentRoom]):t;
+const bm=Math.floor(bt/60),bs=bt%60;
+ctx.fillStyle='#8af';ctx.font=`${Math.min(20,W*0.02)}px monospace`;
+ctx.fillText('Best: '+bm+':'+(bs<10?'0':'')+bs,W/2,H*0.52);
+// Buttons
+const btnW=180,btnH=45;
+const menuBx=W/2-btnW-20,menuBy=H*0.65;
+const nextBx=W/2+20,nextBy=H*0.65;
+const mHover=mouseX>menuBx&&mouseX<menuBx+btnW&&mouseY>menuBy&&mouseY<menuBy+btnH;
+ctx.fillStyle=mHover?'rgba(80,80,120,0.9)':'rgba(40,40,80,0.8)';
+ctx.fillRect(menuBx,menuBy,btnW,btnH);
+ctx.strokeStyle='#88a';ctx.lineWidth=2;ctx.strokeRect(menuBx,menuBy,btnW,btnH);
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(18,W*0.018)}px Arial`;
+ctx.fillText('MENU',menuBx+btnW/2,menuBy+btnH/2+6);
+if(currentRoom<4){
+const nHover=mouseX>nextBx&&mouseX<nextBx+btnW&&mouseY>nextBy&&mouseY<nextBy+btnH;
+ctx.fillStyle=nHover?'rgba(40,120,40,0.9)':'rgba(20,80,20,0.8)';
+ctx.fillRect(nextBx,nextBy,btnW,btnH);
+ctx.strokeStyle='#4a4';ctx.lineWidth=2;ctx.strokeRect(nextBx,nextBy,btnW,btnH);
+ctx.fillStyle='#fff';ctx.fillText('NEXT ROOM',nextBx+btnW/2,nextBy+btnH/2+6);
+}
+// Retry
+const retBx=W/2-btnW/2,retBy=H*0.75;
+const rHover=mouseX>retBx&&mouseX<retBx+btnW&&mouseY>retBy&&mouseY<retBy+btnH;
+ctx.fillStyle=rHover?'rgba(120,100,40,0.9)':'rgba(80,60,20,0.8)';
+ctx.fillRect(retBx,retBy,btnW,btnH);
+ctx.strokeStyle='#aa4';ctx.lineWidth=2;ctx.strokeRect(retBx,retBy,btnW,btnH);
+ctx.fillStyle='#fff';ctx.fillText('RETRY',retBx+btnW/2,retBy+btnH/2+6);
+ctx.textAlign='left';
+}
+
+// ============ CLICK HANDLER ============
+function handleClick(x,y){
+if(state==='menu'){
+const cardW=Math.min(W*0.8,700),cardH=H*0.11,startY=H*0.28;
+for(let i=0;i<5;i++){
+const cy=startY+i*(cardH+H*0.02);
+if(x>W/2-cardW/2&&x<W/2+cardW/2&&y>cy&&y<cy+cardH){
+sfxClick();initRoom(i);return;
+}
+}
+// Reset
+const rbx=W/2-50,rby=H*0.92,rbw=100,rbh=30;
+if(x>rbx&&x<rbx+rbw&&y>rby&&y<rby+rbh){
+if(confirm('Reset all progress?')){
+bestTimes={};roomCompleted={};
+localStorage.removeItem('escapeRoomBest');localStorage.removeItem('escapeRoomDone');
+sfxClick();
+}
+}
+return;
+}
+if(state==='roomComplete'){
+const btnW=180,btnH=45;
+const menuBx=W/2-btnW-20,menuBy=H*0.65;
+const nextBx=W/2+20,nextBy=H*0.65;
+const retBx=W/2-btnW/2,retBy=H*0.75;
+if(x>menuBx&&x<menuBx+btnW&&y>menuBy&&y<menuBy+btnH){sfxClick();state='menu';return;}
+if(currentRoom<4&&x>nextBx&&x<nextBx+btnW&&y>nextBy&&y<nextBy+btnH){sfxClick();initRoom(currentRoom+1);return;}
+if(x>retBx&&x<retBx+btnW&&y>retBy&&y<retBy+btnH){sfxClick();initRoom(currentRoom);return;}
+return;
+}
+if(state==='game'){
+// Back to menu button
+if(x>5&&x<85&&y>40&&y<65){sfxClick();state='menu';return;}
+// Hint button
+const barH=H*0.12,barY=H-barH,slotSize=Math.min(barH*0.7,W/10);
+const hbx=W*0.02,hby=barY+(barH-slotSize)/2,hbw=W*0.1,hbh=slotSize;
+if(x>hbx&&x<hbx+hbw&&y>hby&&y<hby+hbh){
+if(hints>0){hints--;hintText=getHint();hintTimer=5;sfxHint();}
+else showMessage('No hints remaining!');
+return;
+}
+// Inventory clicks
+const startX=W*0.15;
+for(let i=0;i<8;i++){
+const sx=startX+i*(slotSize+8),sy=barY+(barH-slotSize)/2;
+if(x>sx&&x<sx+slotSize&&y>sy&&y<sy+slotSize){
+if(i<inventory.length){selectedItem=selectedItem===i?-1:i;sfxClick();}
+return;
+}
+}
+// Room click (only if in game area above inventory)
+if(y<barY){clickRoom(x,y);}
+}
+}
+
+// ============ MAIN LOOP ============
+function update(dt){
+if(state==='game'&&timerRunning)timer+=dt;
+if(messageTimer>0)messageTimer-=dt;
+if(hintTimer>0)hintTimer-=dt;
+}
+
+function draw(){
+ctx.clearRect(0,0,W,H);
+if(state==='menu'){
+backLink.style.display='block';
+drawMenu();
+cursorStyle=menuHover>=0||menuBtnHover?'pointer':'default';
+}else if(state==='game'){
+backLink.style.display='none';
+drawRoom();
+drawInventory();
+drawTimer();
+drawRoomTitle();
+drawMessage();
+drawClickAnims();
+// Cursor
+const barY=H-H*0.12;
+hoveredObj=mouseY<barY?hoverRoom(mouseX,mouseY):null;
+if(hoveredObj||( mouseX>5&&mouseX<85&&mouseY>40&&mouseY<65)){
+cursorStyle='pointer';
+}else{
+// Check inventory hover
+const slotSize=Math.min(H*0.12*0.7,W/10);
+const startX=W*0.15;
+let invHover=false;
+for(let i=0;i<inventory.length;i++){
+const sx=startX+i*(slotSize+8),sy=(H-H*0.12)+(H*0.12-slotSize)/2;
+if(mouseX>sx&&mouseX<sx+slotSize&&mouseY>sy&&mouseY<sy+slotSize){invHover=true;break;}
+}
+const hbx=W*0.02,hby=(H-H*0.12)+(H*0.12-slotSize)/2,hbw=W*0.1;
+if(mouseX>hbx&&mouseX<hbx+hbw&&mouseY>hby&&mouseY<hby+slotSize)invHover=true;
+cursorStyle=invHover?'pointer':'default';
+}
+// Tooltip
+if(hoveredObj){
+ctx.fillStyle='rgba(0,0,0,0.8)';
+const tw=ctx.measureText(hoveredObj).width+20;
+ctx.fillRect(mouseX+10,mouseY-30,tw,24);
+ctx.fillStyle='#fff';ctx.font='13px Arial';ctx.fillText(hoveredObj,mouseX+20,mouseY-13);
+}
+}else if(state==='roomComplete'){
+backLink.style.display='none';
+drawRoomComplete();
+cursorStyle='pointer';
+}
+canvas.style.cursor=cursorStyle;
+}
+
+let prevTime=performance.now();
+function gameLoop(time){
+const dt=(time-prevTime)/1000;
+prevTime=time;
+update(Math.min(dt,0.1));
+draw();
+requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
