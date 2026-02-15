@@ -55,6 +55,8 @@ let roomCompleted=JSON.parse(localStorage.getItem('escapeRoomDone')||'{}');
 let hoveredObj=null;
 let menuHover=-1;
 let menuBtnHover='';
+let paused=false;
+let stateBeforePause='';
 
 canvas.addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY;});
 canvas.addEventListener('click',e=>{
@@ -62,6 +64,32 @@ initAudio();
 mouseX=e.clientX;mouseY=e.clientY;
 clickAnim.push({x:mouseX,y:mouseY,t:0});
 handleClick(mouseX,mouseY);
+});
+
+// Keyboard
+window.addEventListener('keydown',e=>{
+if(e.key==='Escape'){
+if(state==='game'||state==='roomComplete'||paused){
+paused=false;
+window.location.href='../../index.html';
+return;
+}
+}
+if(e.key==='p'||e.key==='P'){
+if(paused){
+// Unpause
+paused=false;
+state=stateBeforePause;
+lastTime=performance.now();
+prevTime=performance.now();
+return;
+}
+if(state==='game'||state==='roomComplete'){
+stateBeforePause=state;
+paused=true;
+return;
+}
+}
 });
 
 // Rooms definition
@@ -1312,6 +1340,18 @@ ctx.textAlign='left';
 
 // ============ CLICK HANDLER ============
 function handleClick(x,y){
+if(paused){
+const btnW=260,btnH=50;
+const resumeX=W/2-btnW/2,resumeY=H*0.45;
+const menuX=W/2-btnW/2,menuY=H*0.45+btnH+20;
+if(x>resumeX&&x<resumeX+btnW&&y>resumeY&&y<resumeY+btnH){
+paused=false;state=stateBeforePause;lastTime=performance.now();prevTime=performance.now();sfxClick();
+}
+if(x>menuX&&x<menuX+btnW&&y>menuY&&y<menuY+btnH){
+paused=false;window.location.href='../../index.html';
+}
+return;
+}
 if(state==='menu'){
 const cardW=Math.min(W*0.8,700),cardH=H*0.11,startY=H*0.28;
 for(let i=0;i<5;i++){
@@ -1368,6 +1408,7 @@ if(y<barY){clickRoom(x,y);}
 
 // ============ MAIN LOOP ============
 function update(dt){
+if(paused)return;
 if(state==='game'&&timerRunning)timer+=dt;
 if(messageTimer>0)messageTimer-=dt;
 if(hintTimer>0)hintTimer-=dt;
@@ -1416,6 +1457,33 @@ ctx.fillStyle='#fff';ctx.font='13px Arial';ctx.fillText(hoveredObj,mouseX+20,mou
 backLink.style.display='none';
 drawRoomComplete();
 cursorStyle='pointer';
+}
+// Pause overlay
+if(paused){
+ctx.fillStyle='rgba(0,0,0,0.7)';
+ctx.fillRect(0,0,W,H);
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(64,W*0.06)}px 'Segoe UI', Arial`;
+ctx.textAlign='center';ctx.fillText('PAUSED',W/2,H*0.35);
+// Resume button
+const btnW=260,btnH=50;
+const resumeX=W/2-btnW/2,resumeY=H*0.45;
+const menuX=W/2-btnW/2,menuY=H*0.45+btnH+20;
+const onResume=mouseX>resumeX&&mouseX<resumeX+btnW&&mouseY>resumeY&&mouseY<resumeY+btnH;
+const onMenu=mouseX>menuX&&mouseX<menuX+btnW&&mouseY>menuY&&mouseY<menuY+btnH;
+ctx.fillStyle=onResume?'#5b5':'#4a4';
+ctx.fillRect(resumeX,resumeY,btnW,btnH);
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(22,W*0.022)}px 'Segoe UI', Arial`;
+ctx.fillText('RESUME',W/2,resumeY+btnH/2+7);
+// Main Menu button
+ctx.fillStyle=onMenu?'#d55':'#c44';
+ctx.fillRect(menuX,menuY,btnW,btnH);
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(22,W*0.022)}px 'Segoe UI', Arial`;
+ctx.fillText('MAIN MENU',W/2,menuY+btnH/2+7);
+// Help text
+ctx.fillStyle='#aaa';ctx.font=`${Math.min(16,W*0.016)}px 'Segoe UI', Arial`;
+ctx.fillText('Press P to resume | ESC for main menu',W/2,menuY+btnH+40);
+ctx.textAlign='left';
+cursorStyle=(onResume||onMenu)?'pointer':'default';
 }
 canvas.style.cursor=cursorStyle;
 }
