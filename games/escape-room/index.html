@@ -1402,7 +1402,12 @@ const cpPad=16;
 const ctrlFontSize=Math.max(14,Math.min(16,W*0.016));
 const headFontSize=Math.max(16,Math.min(20,W*0.02));
 const lineH=ctrlFontSize+10;
-const controls=[
+const controls=isTouchDevice?[
+{key:'Tap',desc:'Interact with objects'},
+{key:'Tap item',desc:'Select from inventory'},
+{key:'Tap hint',desc:'Get a hint (3 per room)'},
+{key:'\u23F8',desc:'Pause the game'}
+]:[
 {key:'Click',desc:'Interact with objects'},
 {key:'Click item',desc:'Select from inventory'},
 {key:'Hint button',desc:'Get a clue (3 per room)'},

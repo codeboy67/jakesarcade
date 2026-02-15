@@ -2218,7 +2218,12 @@ function drawMenu() {
 
     // Controls panel
     {
-        const controls = [
+        const controls = isTouchDevice ? [
+            { key: '\u25C0 / \u25B6', desc: 'Move left / right' },
+            { key: 'JUMP', desc: 'Jump (tap twice for double jump)' },
+            { key: 'DASH', desc: 'Dash forward' },
+            { key: '\u23F8', desc: 'Pause' },
+        ] : [
             { key: 'A / D  or  Arrow Keys', desc: 'Move left / right' },
             { key: 'SPACE', desc: 'Jump  (tap twice for double jump)' },
             { key: 'SHIFT', desc: 'Dash' },

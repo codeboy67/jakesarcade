@@ -2315,7 +2315,11 @@ function drawMenu() {
     const panelW = 340;
     const headingH = 32;
     const lineH = 30;
-    const controlLines = [
+    const controlLines = isTouchDevice ? [
+        { key: '\u25C0 / \u25B6', desc: 'Move left / right' },
+        { key: 'FIRE', desc: 'Shoot' },
+        { key: '\u23F8', desc: 'Pause' }
+    ] : [
         { key: 'A / D  or  Arrows', desc: 'Move ship' },
         { key: 'SPACE', desc: 'Shoot' },
         { key: 'P', desc: 'Pause game' },

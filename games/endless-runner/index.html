@@ -1558,7 +1558,11 @@ function drawMenu() {
     }
 
     // ---- CONTROLS PANEL ----
-    const controlsData = [
+    const controlsData = isTouchDevice ? [
+        { key: 'Tap top half',    desc: 'Jump (hold for higher)' },
+        { key: 'Tap bottom half', desc: 'Slide' },
+        { key: '\u23F8',          desc: 'Pause' }
+    ] : [
         { key: 'Space / Up', desc: 'Jump (hold for higher)' },
         { key: 'Double tap', desc: 'Double jump' },
         { key: 'Down / S',   desc: 'Slide' },

@@ -1283,7 +1283,13 @@ function drawMenu() {
   const startBtnY = previewY + 45;
 
   // Controls panel (below start button)
-  const controlLines = [
+  const controlLines = isTouchDevice ? [
+    { key: 'Tap tower',       desc: 'Select tower type' },
+    { key: 'Tap grass',       desc: 'Place tower' },
+    { key: 'Tap placed',      desc: 'Select for upgrade / sell' },
+    { key: 'Send Wave',       desc: 'Start next wave' },
+    { key: 'P',               desc: 'Pause game' },
+  ] : [
     { key: 'Click grass',     desc: 'Place a tower' },
     { key: 'Click tower',     desc: 'Select / Upgrade / Sell' },
     { key: '1 - 5',           desc: 'Select tower type' },

@@ -1853,23 +1853,19 @@ function drawMenu() {
         }
     }
 
-    // ---- CONTROLS PANEL (keyboard only, hidden on touch devices) ----
-    if (isTouchDevice) {
-        // Show a simplified touch controls hint instead
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#555';
-        ctx.font = `${Math.min(16, w * 0.014)}px Arial`;
-        ctx.fillText('Touch controls appear during gameplay', w / 2, startY + 80);
-        ctx.textAlign = 'left';
-    } else {
+    // ---- CONTROLS PANEL ----
+    {
         const controlsFontSize = Math.max(14, Math.min(18, w * 0.014, h * 0.022));
         const headingFontSize = Math.max(18, Math.min(24, w * 0.02));
         const lineHeight = controlsFontSize + 8;
         const colWidth = Math.min(320, w * 0.34);
 
         // Panel dimensions - positioned below menu items with room to breathe
-        const panelW = colWidth * 2 + 60;
-        const panelH = lineHeight * 8 + headingFontSize + 50;
+        const panelW = isTouchDevice ? Math.min(400, w * 0.5) : colWidth * 2 + 60;
+        const touchControlLines = 5;
+        const panelH = isTouchDevice
+            ? lineHeight * (touchControlLines + 1) + headingFontSize + 50
+            : lineHeight * 8 + headingFontSize + 50;
         const panelX = w / 2 - panelW / 2;
         // Start panel 80px below last menu item, but clamp so it fits on screen
         const panelTopIdeal = startY + 50 + 40;
@@ -1937,6 +1933,20 @@ function drawMenu() {
             }
         }
 
+    if (isTouchDevice) {
+        // --- Single-column touch controls ---
+        const touchControls = [
+            ['\u25C0 / \u25B6', 'Move left / right'],
+            ['\u25B2', 'Jump'],
+            ['\u25BC', 'Crouch'],
+            ['P / K / S', 'Punch / Kick / Special'],
+            ['B', 'Block'],
+        ];
+        const tcX = panelX + 30;
+        for (let i = 0; i < touchControls.length; i++) {
+            drawControlLine(tcX, contentTopY + i * lineHeight, touchControls[i][0], touchControls[i][1], 'left');
+        }
+    } else {
         // --- Player 1 column (left) ---
         const p1X = panelX + 30;
         ctx.textAlign = 'left';
@@ -2024,6 +2034,7 @@ function drawMenu() {
         ctx.font = `${controlsFontSize}px Arial`;
         ctx.fillStyle = '#aaa';
         ctx.fillText(genDesc2, curX, generalY);
+    }
 
         ctx.textAlign = 'left';
     }

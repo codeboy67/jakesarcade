@@ -1576,7 +1576,14 @@ function drawMenu() {
     // Panel dimensions and position
     const controlsPanelW = 420;
     const controlsLineH = 26;
-    const controlsLines = [
+    const controlsLines = isTouchDevice ? [
+        { key: '\u25C0 Angle / Angle \u25B6', desc: 'Adjust aim angle' },
+        { key: 'Pwr + / Pwr -', desc: 'Adjust power' },
+        { key: 'FIRE', desc: 'Shoot' },
+        { key: '\u25C0 Move / Move \u25B6', desc: 'Move tank' },
+        { key: '1 - 5', desc: 'Select ammo type' },
+        { key: '| |', desc: 'Pause game' }
+    ] : [
         { key: 'Left / Right', desc: 'Adjust aim angle' },
         { key: 'Up / Down', desc: 'Adjust power' },
         { key: 'Space', desc: 'Fire!' },
@@ -1652,7 +1659,7 @@ function drawMenu() {
     ctx.fillStyle = '#999';
     ctx.font = '13px "Segoe UI", Arial';
     ctx.textAlign = 'center';
-    ctx.fillText('Use Arrow Keys to navigate menu  |  Enter or Space to select', W / 2, H - 8);
+    ctx.fillText(isTouchDevice ? 'Tap to select options' : 'Use Arrow Keys to navigate menu  |  Enter or Space to select', W / 2, H - 8);
 }
 
 function drawMenuTank(x, y, color, angle) {

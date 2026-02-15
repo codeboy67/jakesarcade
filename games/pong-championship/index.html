@@ -1560,12 +1560,17 @@ function drawMenu() {
     ctx.fillStyle = '#666688';
     ctx.font = navHintSize + 'px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('W/S or \u2191/\u2193 to select  |  SPACE or ENTER to start', cw / 2, ch * 0.68);
+    if (isTouchDevice) {
+        ctx.fillText('Tap a mode to select  |  Tap START to begin', cw / 2, ch * 0.68);
+    } else {
+        ctx.fillText('W/S or \u2191/\u2193 to select  |  SPACE or ENTER to start', cw / 2, ch * 0.68);
+    }
     ctx.fillText('Best of 3 sets  |  First to 11 (win by 2)', cw / 2, ch * 0.68 + navHintSize * 1.5);
 
     // --- CONTROLS PANEL ---
     var panelW = Math.min(500, cw * 0.55);
-    var panelH = 220;
+    var numControls = isTouchDevice ? 3 : 6;
+    var panelH = 60 + numControls * 26;
     var panelX = cw / 2 - panelW / 2;
     var panelY = ch * 0.74;
     var lineH = 26;
@@ -1618,14 +1623,23 @@ function drawMenu() {
     var colKeyX = cw / 2 - panelW * 0.2;   // keys column (right-aligned)
     var colDescX = cw / 2 - panelW * 0.12;  // description column (left-aligned)
 
-    var controls = [
-        { key: 'W / S', desc: 'Move paddle (Player 1)', keyCol: '#FFD700', descCol: '#44ff88' },
-        { key: '\u2191 / \u2193', desc: 'Move paddle (Player 2)', keyCol: '#FFD700', descCol: '#ff44aa' },
-        { key: 'SPACE', desc: 'Special ability (Player 1)', keyCol: '#FFD700', descCol: '#44ff88' },
-        { key: 'ENTER', desc: 'Special ability (Player 2)', keyCol: '#FFD700', descCol: '#ff44aa' },
-        { key: 'P', desc: 'Pause game', keyCol: '#FFD700', descCol: '#ccccdd' },
-        { key: 'ESC', desc: 'Main menu', keyCol: '#FFD700', descCol: '#ccccdd' }
-    ];
+    var controls;
+    if (isTouchDevice) {
+        controls = [
+            { key: 'Drag', desc: 'Move paddle up / down', keyCol: '#FFD700', descCol: '#44ff88' },
+            { key: 'Tap ability', desc: 'Use special ability', keyCol: '#FFD700', descCol: '#44ff88' },
+            { key: '\u2759\u2759', desc: 'Pause game', keyCol: '#FFD700', descCol: '#ccccdd' }
+        ];
+    } else {
+        controls = [
+            { key: 'W / S', desc: 'Move paddle (Player 1)', keyCol: '#FFD700', descCol: '#44ff88' },
+            { key: '\u2191 / \u2193', desc: 'Move paddle (Player 2)', keyCol: '#FFD700', descCol: '#ff44aa' },
+            { key: 'SPACE', desc: 'Special ability (Player 1)', keyCol: '#FFD700', descCol: '#44ff88' },
+            { key: 'ENTER', desc: 'Special ability (Player 2)', keyCol: '#FFD700', descCol: '#ff44aa' },
+            { key: 'P', desc: 'Pause game', keyCol: '#FFD700', descCol: '#ccccdd' },
+            { key: 'ESC', desc: 'Main menu', keyCol: '#FFD700', descCol: '#ccccdd' }
+        ];
+    }
 
     for (var ci = 0; ci < controls.length; ci++) {
         var cy = controlStartY + ci * lineH;
