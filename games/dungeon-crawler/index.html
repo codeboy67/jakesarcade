@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Dungeon Crawler - Jake's Arcade</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
-canvas { display: block; }
+canvas { display: block; touch-action: none; }
 #backLink {
     position: fixed; top: 10px; left: 10px; z-index: 100;
     color: #888; font-size: 13px; text-decoration: none;
@@ -239,6 +239,129 @@ let openedChests = new Set();
 let notifications = [];
 let stateBeforePause = STATE.PLAYING;
 
+// --- Touch Device Detection & Controls ---
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+let joystick = {
+    active: false, touchId: null,
+    baseX: 0, baseY: 0,
+    thumbX: 0, thumbY: 0,
+    radius: 60, thumbRadius: 25,
+    dx: 0, dy: 0
+};
+
+let touchButtons = {
+    attack: { x: 0, y: 0, radius: 38, touchId: null, pressed: false },
+    potion: { x: 0, y: 0, radius: 28, touchId: null, pressed: false },
+    pause:  { x: 0, y: 0, w: 50, h: 40, touchId: null, pressed: false },
+    weapons: [] // [{x,y,w,h,index}]
+};
+
+// Track active touches for multi-touch
+let activeTouches = {};
+
+function initTouchControls() {
+    const W = canvas.width;
+    const H = canvas.height;
+
+    // Joystick position - lower left
+    joystick.baseX = 110;
+    joystick.baseY = H - 140;
+    joystick.thumbX = joystick.baseX;
+    joystick.thumbY = joystick.baseY;
+
+    // Attack button - lower right
+    touchButtons.attack.x = W - 100;
+    touchButtons.attack.y = H - 140;
+
+    // Potion button - above attack
+    touchButtons.potion.x = W - 170;
+    touchButtons.potion.y = H - 180;
+
+    // Pause button - top center
+    touchButtons.pause.x = W / 2 - 25;
+    touchButtons.pause.y = 6;
+
+    // Weapon buttons - top left area (below HUD)
+    touchButtons.weapons = [];
+    for (let i = 0; i < 4; i++) {
+        touchButtons.weapons.push({
+            x: 15 + i * 52,
+            y: H - 50,
+            w: 46, h: 40,
+            index: i
+        });
+    }
+}
+
+// Virtual keyboard state for name entry on touch devices
+let virtualKeyboard = {
+    visible: false,
+    keys: [],
+    keyW: 0, keyH: 0,
+    startX: 0, startY: 0,
+    rows: [
+        ['Q','W','E','R','T','Y','U','I','O','P'],
+        ['A','S','D','F','G','H','J','K','L'],
+        ['Z','X','C','V','B','N','M'],
+        ['1','2','3','4','5','6','7','8','9','0'],
+        ['SPACE','BACK','ENTER']
+    ]
+};
+
+function initVirtualKeyboard() {
+    const W = canvas.width;
+    const H = canvas.height;
+    const maxRowLen = 10;
+    const keyGap = 4;
+    const keyW = Math.min(48, Math.floor((W - 40 - keyGap * (maxRowLen - 1)) / maxRowLen));
+    const keyH = Math.max(44, keyW);
+    virtualKeyboard.keyW = keyW;
+    virtualKeyboard.keyH = keyH;
+
+    const totalW = maxRowLen * keyW + (maxRowLen - 1) * keyGap;
+    virtualKeyboard.startX = Math.floor((W - totalW) / 2);
+    virtualKeyboard.startY = H / 2 - 30;
+
+    virtualKeyboard.keys = [];
+    for (let r = 0; r < virtualKeyboard.rows.length; r++) {
+        const row = virtualKeyboard.rows[r];
+
+        // Compute actual row width accounting for special key widths
+        let actualRowW = 0;
+        for (let c = 0; c < row.length; c++) {
+            const label = row[c];
+            let w = keyW;
+            if (label === 'SPACE') w = keyW * 3 + keyGap * 2;
+            else if (label === 'BACK') w = keyW * 2 + keyGap;
+            else if (label === 'ENTER') w = keyW * 2 + keyGap;
+            actualRowW += w;
+            if (c < row.length - 1) actualRowW += keyGap;
+        }
+
+        let rowKeys = [];
+        let offsetX = Math.floor((totalW - actualRowW) / 2) + virtualKeyboard.startX;
+
+        for (let c = 0; c < row.length; c++) {
+            const label = row[c];
+            let w = keyW;
+            if (label === 'SPACE') w = keyW * 3 + keyGap * 2;
+            else if (label === 'BACK') w = keyW * 2 + keyGap;
+            else if (label === 'ENTER') w = keyW * 2 + keyGap;
+
+            rowKeys.push({
+                label: label,
+                x: offsetX,
+                y: virtualKeyboard.startY + r * (keyH + keyGap),
+                w: w,
+                h: keyH
+            });
+            offsetX += w + keyGap;
+        }
+        virtualKeyboard.keys.push(...rowKeys);
+    }
+}
+
 // --- Leaderboard ---
 const LEADERBOARD_KEY = 'dungeonCrawlerLeaderboard';
 let nameEntryText = 'PLAYER';
@@ -286,6 +409,10 @@ function computeScore() {
 function resize() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    if (isTouchDevice) {
+        initTouchControls();
+        initVirtualKeyboard();
+    }
 }
 window.addEventListener('resize', resize);
 resize();
@@ -338,22 +465,266 @@ canvas.addEventListener('mousedown', e => { mouse.down = true; mouse.clicked = t
 canvas.addEventListener('mouseup', e => { mouse.down = false; });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-// Touch support
+// Touch support - multi-touch with virtual joystick and buttons
 canvas.addEventListener('touchstart', e => {
     e.preventDefault();
-    const t = e.touches[0];
-    mouse.x = t.clientX;
-    mouse.y = t.clientY;
-    mouse.down = true;
-    mouse.clicked = true;
+    if (!Audio.ctx) Audio.init(); // Init audio on first touch
+
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        const tx = t.clientX;
+        const ty = t.clientY;
+        const tid = t.identifier;
+
+        activeTouches[tid] = { x: tx, y: ty };
+
+        // --- NAME ENTRY: virtual keyboard ---
+        if (gameState === STATE.NAME_ENTRY && isTouchDevice) {
+            for (const vk of virtualKeyboard.keys) {
+                if (tx >= vk.x && tx <= vk.x + vk.w && ty >= vk.y && ty <= vk.y + vk.h) {
+                    if (vk.label === 'ENTER') {
+                        const finalName = nameEntryText.trim() || 'PLAYER';
+                        addLeaderboardEntry(finalName, nameEntryScore, stats.floorsReached, stats.totalGold);
+                        gameState = STATE.DEAD;
+                    } else if (vk.label === 'BACK') {
+                        nameEntryText = nameEntryText.slice(0, -1);
+                    } else if (vk.label === 'SPACE') {
+                        if (nameEntryText.length < 12) nameEntryText += ' ';
+                    } else {
+                        if (nameEntryText.length < 12) nameEntryText += vk.label;
+                    }
+                    return;
+                }
+            }
+            return;
+        }
+
+        // --- MENU / DEAD / LEVELUP: pass touch as mouse click ---
+        if (gameState === STATE.MENU || gameState === STATE.DEAD || gameState === STATE.LEVELUP) {
+            mouse.x = tx;
+            mouse.y = ty;
+            mouse.down = true;
+            mouse.clicked = true;
+            return;
+        }
+
+        // --- PAUSED: pass touch as mouse click for buttons ---
+        if (gameState === STATE.PAUSED) {
+            mouse.x = tx;
+            mouse.y = ty;
+            mouse.down = true;
+            mouse.clicked = true;
+            return;
+        }
+
+        // --- PLAYING: handle touch controls ---
+        if (gameState === STATE.PLAYING && isTouchDevice) {
+            // Check pause button
+            const pb = touchButtons.pause;
+            if (tx >= pb.x && tx <= pb.x + pb.w && ty >= pb.y && ty <= pb.y + pb.h) {
+                stateBeforePause = gameState;
+                gameState = STATE.PAUSED;
+                return;
+            }
+
+            // Check weapon buttons
+            let hitWeaponBtn = false;
+            for (const wb of touchButtons.weapons) {
+                if (tx >= wb.x && tx <= wb.x + wb.w && ty >= wb.y && ty <= wb.y + wb.h) {
+                    if (player.weaponIndex >= wb.index) {
+                        player.weaponIndex = wb.index;
+                    }
+                    hitWeaponBtn = true;
+                    break;
+                }
+            }
+            if (hitWeaponBtn) return;
+
+            // Check potion button
+            const potBtn = touchButtons.potion;
+            const potDist = Math.sqrt((tx - potBtn.x) ** 2 + (ty - potBtn.y) ** 2);
+            if (potDist <= potBtn.radius + 10) {
+                potBtn.touchId = tid;
+                potBtn.pressed = true;
+                keys['e'] = true;
+                return;
+            }
+
+            // Check attack button
+            const atkBtn = touchButtons.attack;
+            const atkDist = Math.sqrt((tx - atkBtn.x) ** 2 + (ty - atkBtn.y) ** 2);
+            if (atkDist <= atkBtn.radius + 10) {
+                atkBtn.touchId = tid;
+                atkBtn.pressed = true;
+                mouse.clicked = true;
+                return;
+            }
+
+            // Left side of screen: joystick
+            if (tx < canvas.width / 2 && !joystick.active) {
+                joystick.active = true;
+                joystick.touchId = tid;
+                joystick.thumbX = tx;
+                joystick.thumbY = ty;
+                // Compute direction
+                const jdx = tx - joystick.baseX;
+                const jdy = ty - joystick.baseY;
+                const jdist = Math.sqrt(jdx * jdx + jdy * jdy);
+                if (jdist > joystick.radius) {
+                    joystick.thumbX = joystick.baseX + (jdx / jdist) * joystick.radius;
+                    joystick.thumbY = joystick.baseY + (jdy / jdist) * joystick.radius;
+                }
+                updateJoystickKeys();
+                return;
+            }
+
+            // Right side fallback: treat as attack aim + attack
+            mouse.x = tx;
+            mouse.y = ty;
+            mouse.clicked = true;
+        } else if (gameState === STATE.PLAYING && !isTouchDevice) {
+            // Non-touch-device fallback (shouldn't normally reach here)
+            mouse.x = tx;
+            mouse.y = ty;
+            mouse.down = true;
+            mouse.clicked = true;
+        }
+    }
 });
+
 canvas.addEventListener('touchmove', e => {
     e.preventDefault();
-    const t = e.touches[0];
-    mouse.x = t.clientX;
-    mouse.y = t.clientY;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        const tx = t.clientX;
+        const ty = t.clientY;
+        const tid = t.identifier;
+
+        activeTouches[tid] = { x: tx, y: ty };
+
+        // Update joystick if this touch belongs to it
+        if (joystick.active && joystick.touchId === tid) {
+            const jdx = tx - joystick.baseX;
+            const jdy = ty - joystick.baseY;
+            const jdist = Math.sqrt(jdx * jdx + jdy * jdy);
+            if (jdist > joystick.radius) {
+                joystick.thumbX = joystick.baseX + (jdx / jdist) * joystick.radius;
+                joystick.thumbY = joystick.baseY + (jdy / jdist) * joystick.radius;
+            } else {
+                joystick.thumbX = tx;
+                joystick.thumbY = ty;
+            }
+            updateJoystickKeys();
+        }
+
+        // Update mouse position for non-joystick, non-button touches (for aiming)
+        if (!joystick.active || joystick.touchId !== tid) {
+            if (touchButtons.attack.touchId !== tid && touchButtons.potion.touchId !== tid) {
+                mouse.x = tx;
+                mouse.y = ty;
+            }
+        }
+    }
 });
-canvas.addEventListener('touchend', e => { mouse.down = false; });
+
+canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const t = e.changedTouches[i];
+        const tid = t.identifier;
+
+        delete activeTouches[tid];
+
+        // Release joystick
+        if (joystick.active && joystick.touchId === tid) {
+            joystick.active = false;
+            joystick.touchId = null;
+            joystick.thumbX = joystick.baseX;
+            joystick.thumbY = joystick.baseY;
+            joystick.dx = 0;
+            joystick.dy = 0;
+            keys['w'] = false;
+            keys['a'] = false;
+            keys['s'] = false;
+            keys['d'] = false;
+        }
+
+        // Release attack button
+        if (touchButtons.attack.touchId === tid) {
+            touchButtons.attack.touchId = null;
+            touchButtons.attack.pressed = false;
+        }
+
+        // Release potion button
+        if (touchButtons.potion.touchId === tid) {
+            touchButtons.potion.touchId = null;
+            touchButtons.potion.pressed = false;
+        }
+
+        // If no touches left, release mouse
+        if (Object.keys(activeTouches).length === 0) {
+            mouse.down = false;
+        }
+    }
+});
+
+canvas.addEventListener('touchcancel', e => {
+    e.preventDefault();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        const tid = e.changedTouches[i].identifier;
+        delete activeTouches[tid];
+
+        if (joystick.active && joystick.touchId === tid) {
+            joystick.active = false;
+            joystick.touchId = null;
+            joystick.thumbX = joystick.baseX;
+            joystick.thumbY = joystick.baseY;
+            joystick.dx = 0;
+            joystick.dy = 0;
+            keys['w'] = false; keys['a'] = false; keys['s'] = false; keys['d'] = false;
+        }
+        if (touchButtons.attack.touchId === tid) {
+            touchButtons.attack.touchId = null;
+            touchButtons.attack.pressed = false;
+        }
+        if (touchButtons.potion.touchId === tid) {
+            touchButtons.potion.touchId = null;
+            touchButtons.potion.pressed = false;
+        }
+    }
+    if (Object.keys(activeTouches).length === 0) {
+        mouse.down = false;
+    }
+});
+
+function updateJoystickKeys() {
+    const jdx = joystick.thumbX - joystick.baseX;
+    const jdy = joystick.thumbY - joystick.baseY;
+    const jdist = Math.sqrt(jdx * jdx + jdy * jdy);
+    const deadzone = joystick.radius * 0.2;
+
+    if (jdist < deadzone) {
+        joystick.dx = 0;
+        joystick.dy = 0;
+        keys['w'] = false;
+        keys['a'] = false;
+        keys['s'] = false;
+        keys['d'] = false;
+        return;
+    }
+
+    const normX = jdx / jdist;
+    const normY = jdy / jdist;
+    joystick.dx = normX;
+    joystick.dy = normY;
+
+    // Map to WASD keys with threshold
+    const threshold = 0.38;
+    keys['a'] = normX < -threshold;
+    keys['d'] = normX > threshold;
+    keys['w'] = normY < -threshold;
+    keys['s'] = normY > threshold;
+}
 
 // --- Utility ---
 function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
@@ -660,10 +1031,14 @@ function updatePlayer(dt) {
     player.x = clamp(player.x, TILE, (MAP_W - 1) * TILE);
     player.y = clamp(player.y, TILE, (MAP_H - 1) * TILE);
 
-    // Facing direction (toward mouse)
+    // Facing direction (toward mouse, or toward joystick direction on touch)
     const screenX = player.x - camera.x;
     const screenY = player.y - camera.y;
-    player.facing = Math.atan2(mouse.y - screenY, mouse.x - screenX);
+    if (isTouchDevice && joystick.active && (joystick.dx !== 0 || joystick.dy !== 0)) {
+        player.facing = Math.atan2(joystick.dy, joystick.dx);
+    } else {
+        player.facing = Math.atan2(mouse.y - screenY, mouse.x - screenX);
+    }
 
     // Attack
     if (mouse.clicked && !player.isSwinging) {
@@ -1777,11 +2152,166 @@ function drawHUD() {
     }
     ctx.globalAlpha = 1;
 
-    // Controls hint (bottom)
-    ctx.font = '11px Courier New';
-    ctx.fillStyle = '#666';
+    // Controls hint (bottom) - only for non-touch devices
+    if (!isTouchDevice) {
+        ctx.font = '11px Courier New';
+        ctx.fillStyle = '#666';
+        ctx.textAlign = 'center';
+        ctx.fillText('WASD: Move  |  Click: Attack  |  E: Potion', canvas.width / 2, canvas.height - 15);
+    }
+}
+
+function drawTouchControls() {
+    if (!isTouchDevice) return;
+    if (gameState !== STATE.PLAYING) return;
+
+    ctx.save();
+
+    // --- Virtual Joystick ---
+    // Base circle
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(joystick.baseX, joystick.baseY, joystick.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#aaa';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Direction indicators on base
+    ctx.globalAlpha = 0.15;
+    ctx.font = 'bold 14px Courier New';
+    ctx.fillStyle = '#fff';
     ctx.textAlign = 'center';
-    ctx.fillText('WASD: Move  |  Click: Attack  |  E: Potion', canvas.width / 2, canvas.height - 15);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('\u25B2', joystick.baseX, joystick.baseY - joystick.radius * 0.6);
+    ctx.fillText('\u25BC', joystick.baseX, joystick.baseY + joystick.radius * 0.6);
+    ctx.fillText('\u25C0', joystick.baseX - joystick.radius * 0.6, joystick.baseY);
+    ctx.fillText('\u25B6', joystick.baseX + joystick.radius * 0.6, joystick.baseY);
+
+    // Thumb circle
+    ctx.globalAlpha = joystick.active ? 0.6 : 0.35;
+    ctx.fillStyle = joystick.active ? '#fff' : '#ccc';
+    ctx.beginPath();
+    ctx.arc(joystick.thumbX, joystick.thumbY, joystick.thumbRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = joystick.active ? 0.8 : 0.4;
+    ctx.stroke();
+
+    // --- Attack Button ---
+    const atk = touchButtons.attack;
+    ctx.globalAlpha = atk.pressed ? 0.6 : 0.3;
+    ctx.fillStyle = atk.pressed ? '#f44' : '#c33';
+    ctx.beginPath();
+    ctx.arc(atk.x, atk.y, atk.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = atk.pressed ? '#f88' : '#f44';
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = atk.pressed ? 0.8 : 0.5;
+    ctx.stroke();
+    // Sword icon / label
+    ctx.globalAlpha = atk.pressed ? 0.9 : 0.6;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 13px Courier New';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('ATK', atk.x, atk.y);
+
+    // --- Potion Button ---
+    const pot = touchButtons.potion;
+    ctx.globalAlpha = pot.pressed ? 0.6 : 0.3;
+    ctx.fillStyle = pot.pressed ? '#4f4' : '#2a2';
+    ctx.beginPath();
+    ctx.arc(pot.x, pot.y, pot.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = pot.pressed ? '#8f8' : '#4f4';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = pot.pressed ? 0.8 : 0.5;
+    ctx.stroke();
+    ctx.globalAlpha = pot.pressed ? 0.9 : 0.6;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px Courier New';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('POT', pot.x, pot.y - 2);
+    // Show potion count
+    ctx.font = '9px Courier New';
+    ctx.fillText(`(${player.potions})`, pot.x, pot.y + 10);
+
+    // --- Pause Button ---
+    const pau = touchButtons.pause;
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#555';
+    ctx.fillRect(pau.x, pau.y, pau.w, pau.h);
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(pau.x, pau.y, pau.w, pau.h);
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 16px Courier New';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('||', pau.x + pau.w / 2, pau.y + pau.h / 2);
+
+    // --- Weapon Buttons ---
+    for (const wb of touchButtons.weapons) {
+        const isActive = player.weaponIndex === wb.index;
+        const isAvailable = player.weaponIndex >= wb.index;
+        ctx.globalAlpha = isAvailable ? (isActive ? 0.5 : 0.25) : 0.12;
+        ctx.fillStyle = isActive ? '#553' : '#222';
+        ctx.fillRect(wb.x, wb.y, wb.w, wb.h);
+        ctx.strokeStyle = isActive ? '#fd0' : (isAvailable ? '#886' : '#444');
+        ctx.lineWidth = isActive ? 2 : 1;
+        ctx.strokeRect(wb.x, wb.y, wb.w, wb.h);
+
+        ctx.globalAlpha = isAvailable ? (isActive ? 0.9 : 0.5) : 0.2;
+        ctx.fillStyle = isActive ? '#fd0' : '#ccc';
+        ctx.font = 'bold 10px Courier New';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const weaponShort = ['DAG', 'SWD', 'AXE', 'STF'][wb.index];
+        ctx.fillText(weaponShort, wb.x + wb.w / 2, wb.y + wb.h / 2 - 4);
+        ctx.font = '8px Courier New';
+        ctx.fillText(`${wb.index + 1}`, wb.x + wb.w / 2, wb.y + wb.h / 2 + 10);
+    }
+
+    ctx.restore();
+}
+
+function drawVirtualKeyboard() {
+    if (!isTouchDevice) return;
+    if (gameState !== STATE.NAME_ENTRY) return;
+
+    ctx.save();
+    for (const vk of virtualKeyboard.keys) {
+        // Key background
+        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = '#2a2018';
+        ctx.fillRect(vk.x, vk.y, vk.w, vk.h);
+        ctx.strokeStyle = '#886';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(vk.x, vk.y, vk.w, vk.h);
+
+        // Key label
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = '#fff';
+        let fontSize = 16;
+        if (vk.label === 'SPACE') fontSize = 12;
+        else if (vk.label === 'BACK' || vk.label === 'ENTER') fontSize = 11;
+        ctx.font = `bold ${fontSize}px Courier New`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        let displayLabel = vk.label;
+        if (vk.label === 'SPACE') displayLabel = 'SPACE';
+        else if (vk.label === 'BACK') displayLabel = '\u2190 DEL';
+        else if (vk.label === 'ENTER') displayLabel = 'DONE';
+
+        ctx.fillText(displayLabel, vk.x + vk.w / 2, vk.y + vk.h / 2);
+    }
+    ctx.restore();
 }
 
 function drawLevelUpScreen() {
@@ -1847,28 +2377,31 @@ function drawNameEntryScreen() {
     ctx.fillStyle = 'rgba(20, 0, 0, 0.85)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    // Shift content up on touch devices to make room for virtual keyboard
+    const touchOffset = isTouchDevice ? -100 : 0;
+
     ctx.font = 'bold 48px Courier New';
     ctx.fillStyle = '#a00';
     ctx.textAlign = 'center';
-    ctx.fillText('YOU DIED', canvas.width / 2, canvas.height / 2 - 160);
+    ctx.fillText('YOU DIED', canvas.width / 2, canvas.height / 2 - 160 + touchOffset);
 
     // Score info
     ctx.font = '18px Courier New';
     ctx.fillStyle = '#FFD700';
-    ctx.fillText(`NEW HIGH SCORE!`, canvas.width / 2, canvas.height / 2 - 110);
+    ctx.fillText(`NEW HIGH SCORE!`, canvas.width / 2, canvas.height / 2 - 110 + touchOffset);
     ctx.fillStyle = '#ccc';
-    ctx.fillText(`Floor ${stats.floorsReached}  |  ${stats.totalGold} Gold  |  Score: ${nameEntryScore}`, canvas.width / 2, canvas.height / 2 - 80);
+    ctx.fillText(`Floor ${stats.floorsReached}  |  ${stats.totalGold} Gold  |  Score: ${nameEntryScore}`, canvas.width / 2, canvas.height / 2 - 80 + touchOffset);
 
     // Name entry prompt
     ctx.font = 'bold 22px Courier New';
     ctx.fillStyle = '#fd0';
-    ctx.fillText('ENTER YOUR NAME:', canvas.width / 2, canvas.height / 2 - 30);
+    ctx.fillText('ENTER YOUR NAME:', canvas.width / 2, canvas.height / 2 - 30 + touchOffset);
 
     // Name input box
     const boxW = 300;
     const boxH = 44;
     const boxX = canvas.width / 2 - boxW / 2;
-    const boxY = canvas.height / 2 - 10;
+    const boxY = canvas.height / 2 - 10 + touchOffset;
 
     ctx.fillStyle = '#1a1008';
     ctx.fillRect(boxX, boxY, boxW, boxH);
@@ -1889,7 +2422,8 @@ function drawNameEntryScreen() {
     // Instructions
     ctx.font = '13px Courier New';
     ctx.fillStyle = '#888';
-    ctx.fillText('Type your name (max 12 chars) and press ENTER', canvas.width / 2, boxY + 65);
+    const nameHintText = isTouchDevice ? 'Tap keys below (max 12 chars), then tap DONE' : 'Type your name (max 12 chars) and press ENTER';
+    ctx.fillText(nameHintText, canvas.width / 2, boxY + 65);
 }
 
 function drawLeaderboardPanel(x, y, w, maxEntries, title) {
@@ -2134,7 +2668,13 @@ function drawMenuScreen() {
     ctx.stroke();
 
     // Control entries
-    const controls = [
+    const controls = isTouchDevice ? [
+        { key: 'JOYSTICK', desc: 'Move' },
+        { key: 'ATK BTN', desc: 'Attack' },
+        { key: 'POT BTN', desc: 'Use potion' },
+        { key: '|| BTN', desc: 'Pause' },
+        { key: '1-4 BTN', desc: 'Switch weapon' }
+    ] : [
         { key: 'W A S D', desc: 'Move' },
         { key: 'CLICK', desc: 'Attack' },
         { key: 'E', desc: 'Use potion' },
@@ -2278,7 +2818,8 @@ function drawPauseScreen() {
     // Help text
     ctx.font = '14px Courier New';
     ctx.fillStyle = '#999';
-    ctx.fillText('Press P to resume | ESC for main menu', canvas.width / 2, menuY + btnH + 35);
+    const pauseHintText = isTouchDevice ? 'Tap a button above' : 'Press P to resume | ESC for main menu';
+    ctx.fillText(pauseHintText, canvas.width / 2, menuY + btnH + 35);
 
     // Handle clicks
     if (mouse.clicked) {
@@ -2309,6 +2850,10 @@ function gameLoop(timestamp) {
 
         case STATE.PLAYING:
             backLink.style.display = 'none';
+            // Touch: continuously trigger attack while attack button held
+            if (isTouchDevice && touchButtons.attack.pressed && !player.isSwinging) {
+                mouse.clicked = true;
+            }
             updatePlayer(dt);
             updateMonsters(dt);
             updateProjectiles(dt);
@@ -2351,6 +2896,7 @@ function gameLoop(timestamp) {
             drawTorchlight();
             drawMinimap();
             drawHUD();
+            drawTouchControls();
             break;
 
         case STATE.LEVELUP:
@@ -2383,6 +2929,7 @@ function gameLoop(timestamp) {
         case STATE.NAME_ENTRY:
             backLink.style.display = 'none';
             drawNameEntryScreen();
+            drawVirtualKeyboard();
             break;
 
         case STATE.PAUSED:
