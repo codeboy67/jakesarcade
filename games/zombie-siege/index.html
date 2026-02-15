@@ -1481,7 +1481,7 @@ class Game {
 
     // Title
     ctx.save();
-    ctx.translate(cx, cy - 120);
+    ctx.translate(cx, cy - 180);
     ctx.scale(pulse, pulse);
     ctx.fillStyle = '#f44';
     ctx.shadowColor = '#f00';
@@ -1496,25 +1496,101 @@ class Game {
 
     ctx.shadowBlur = 0;
 
-    // Instructions
-    ctx.fillStyle = '#888';
-    ctx.font = '18px "Courier New"';
+    // --- CONTROLS PANEL ---
+    const panelW = 380;
+    const panelH = 280;
+    const panelX = cx - panelW / 2;
+    const panelY = cy - 95;
+
+    // Dark semi-transparent background panel
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.beginPath();
+    const r = 12; // border radius
+    ctx.moveTo(panelX + r, panelY);
+    ctx.lineTo(panelX + panelW - r, panelY);
+    ctx.quadraticCurveTo(panelX + panelW, panelY, panelX + panelW, panelY + r);
+    ctx.lineTo(panelX + panelW, panelY + panelH - r);
+    ctx.quadraticCurveTo(panelX + panelW, panelY + panelH, panelX + panelW - r, panelY + panelH);
+    ctx.lineTo(panelX + r, panelY + panelH);
+    ctx.quadraticCurveTo(panelX, panelY + panelH, panelX, panelY + panelH - r);
+    ctx.lineTo(panelX, panelY + r);
+    ctx.quadraticCurveTo(panelX, panelY, panelX + r, panelY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Panel border
+    ctx.strokeStyle = '#FFD700';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // "CONTROLS" heading
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 26px "Courier New"';
     ctx.textAlign = 'center';
-    ctx.fillText('WASD to move | Mouse to aim | Click to shoot', cx, cy + 30);
-    ctx.fillText('Right-click or SPACE for melee | 1-2-3-4 switch weapons', cx, cy + 60);
-    ctx.fillText('Kill zombies, survive waves, defeat bosses!', cx, cy + 90);
+    ctx.fillText('--- CONTROLS ---', cx, panelY + 35);
+
+    // Divider line under heading
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 30, panelY + 48);
+    ctx.lineTo(panelX + panelW - 30, panelY + 48);
+    ctx.stroke();
+
+    // Control entries
+    const controls = [
+      { key: 'WASD',          desc: 'Move' },
+      { key: 'Mouse',         desc: 'Aim' },
+      { key: 'Click',         desc: 'Shoot' },
+      { key: '1-4 / Scroll',  desc: 'Switch weapon' },
+      { key: 'P',             desc: 'Pause' },
+      { key: 'ESC',           desc: 'Main menu' }
+    ];
+
+    const startY = panelY + 80;
+    const lineHeight = 34;
+    const keyColX = panelX + 40;
+    const descColX = panelX + 220;
+
+    controls.forEach((ctrl, i) => {
+      const y = startY + i * lineHeight;
+
+      // Key label (gold, bold, larger)
+      ctx.fillStyle = '#FFD700';
+      ctx.font = 'bold 20px "Courier New"';
+      ctx.textAlign = 'right';
+      ctx.fillText(ctrl.key, descColX - 20, y);
+
+      // Separator dash
+      ctx.fillStyle = '#888';
+      ctx.font = '18px "Courier New"';
+      ctx.textAlign = 'center';
+      ctx.fillText('-', descColX - 5, y);
+
+      // Description (white)
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '18px "Courier New"';
+      ctx.textAlign = 'left';
+      ctx.fillText(ctrl.desc, descColX + 8, y);
+    });
+
+    // Tagline below panel
+    ctx.fillStyle = '#aaa';
+    ctx.font = '16px "Courier New"';
+    ctx.textAlign = 'center';
+    ctx.fillText('Kill zombies, survive waves, defeat bosses!', cx, panelY + panelH + 30);
 
     // Start prompt
     const alpha = Math.sin(this.menuPulse * 2) * 0.3 + 0.7;
     ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
     ctx.font = 'bold 28px "Courier New"';
-    ctx.fillText('[ CLICK TO START ]', cx, cy + 160);
+    ctx.fillText('[ CLICK TO START ]', cx, panelY + panelH + 75);
 
     // High score
     if (this.highScore > 0) {
       ctx.fillStyle = '#fa0';
       ctx.font = '20px "Courier New"';
-      ctx.fillText('High Score: ' + this.highScore, cx, cy + 210);
+      ctx.fillText('High Score: ' + this.highScore, cx, panelY + panelH + 115);
     }
   }
 
