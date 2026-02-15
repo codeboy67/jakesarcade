@@ -1887,17 +1887,71 @@ function drawMenuScreen() {
     ctx.fillStyle = hover ? '#fd0' : '#dda';
     ctx.fillText('PLAY', canvas.width / 2, btnY + 33);
 
-    // Instructions
-    ctx.font = '12px Courier New';
-    ctx.fillStyle = '#665';
-    const instructions = [
-        'WASD to move  |  Click to attack  |  E for potions',
-        'Explore dungeon floors, fight monsters, collect loot!',
-        'Find the stairs to descend deeper...'
+    // --- CONTROLS PANEL ---
+    const controlsTopY = btnY + 70;
+    const panelW = 320;
+    const panelH = 210;
+    const panelX = canvas.width / 2 - panelW / 2;
+    const panelY = controlsTopY;
+
+    // Semi-transparent dark background panel
+    ctx.fillStyle = 'rgba(10, 8, 6, 0.85)';
+    ctx.fillRect(panelX, panelY, panelW, panelH);
+    // Panel border
+    ctx.strokeStyle = '#665';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(panelX, panelY, panelW, panelH);
+
+    // "CONTROLS" heading
+    ctx.font = 'bold 20px Courier New';
+    ctx.fillStyle = '#FFD700';
+    ctx.textAlign = 'center';
+    ctx.fillText('CONTROLS', canvas.width / 2, panelY + 28);
+
+    // Divider line under heading
+    ctx.strokeStyle = '#554';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 20, panelY + 40);
+    ctx.lineTo(panelX + panelW - 20, panelY + 40);
+    ctx.stroke();
+
+    // Control entries
+    const controls = [
+        { key: 'W A S D', desc: 'Move' },
+        { key: 'CLICK', desc: 'Attack' },
+        { key: 'E', desc: 'Use potion' },
+        { key: 'P', desc: 'Pause' },
+        { key: 'ESC', desc: 'Main menu' }
     ];
-    for (let i = 0; i < instructions.length; i++) {
-        ctx.fillText(instructions[i], canvas.width / 2, btnY + 80 + i * 20);
+    const lineHeight = 28;
+    const startY = panelY + 62;
+    const keyX = canvas.width / 2 - 60;
+    const descX = canvas.width / 2 + 60;
+
+    for (let i = 0; i < controls.length; i++) {
+        const y = startY + i * lineHeight;
+        // Key label in gold/bold
+        ctx.font = 'bold 18px Courier New';
+        ctx.fillStyle = '#FFD700';
+        ctx.textAlign = 'right';
+        ctx.fillText(controls[i].key, keyX, y);
+        // Separator
+        ctx.fillStyle = '#665';
+        ctx.textAlign = 'center';
+        ctx.fillText(':', canvas.width / 2 - 30, y);
+        // Description in white
+        ctx.font = '17px Courier New';
+        ctx.fillStyle = '#eee';
+        ctx.textAlign = 'left';
+        ctx.fillText(controls[i].desc, descX - 80, y);
     }
+
+    // Tip text below controls
+    ctx.textAlign = 'center';
+    ctx.font = '13px Courier New';
+    ctx.fillStyle = '#887';
+    ctx.fillText('Explore floors, fight monsters, find loot!', canvas.width / 2, panelY + panelH + 20);
 
     // Floating particles on menu
     const time = Date.now() * 0.001;
