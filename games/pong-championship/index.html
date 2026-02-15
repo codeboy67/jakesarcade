@@ -124,7 +124,7 @@ var BEST_OF_SETS = 3;
 var PADDLE_SPEED_RATIO = 0.009;
 
 // --- Game State ---
-var STATE = { MENU: 0, PLAYING: 1, COUNTDOWN: 2, SET_OVER: 3, MATCH_OVER: 4, PAUSED: 5 };
+var STATE = { MENU: 0, PLAYING: 1, COUNTDOWN: 2, SET_OVER: 3, MATCH_OVER: 4, PAUSED: 5, NAME_ENTRY: 6 };
 
 var gameState = STATE.MENU;
 var stateBeforePause = null;
@@ -134,6 +134,17 @@ var menuSelection = 0;
 var menuOptions = ['VS AI - Easy', 'VS AI - Medium', 'VS AI - Hard', 'Local 2 Player'];
 var isVsAI = true;
 var aiDifficulty = 1;
+
+// Leaderboard
+var LEADERBOARD_KEY = 'pongLeaderboard';
+var nameEntryText = '';
+var nameEntryCursorBlink = 0;
+var matchWinnerScore = 0;
+var matchWinnerLabel = '';
+
+// Total points tracking per match (cumulative across all sets)
+var p1TotalPoints = 0;
+var p2TotalPoints = 0;
 
 // Tournament
 var p1Sets = 0;
@@ -251,21 +262,49 @@ window.addEventListener('keydown', function(e) {
     } else if (gameState === STATE.MATCH_OVER) {
         if (e.code === 'Space' || e.code === 'Enter') {
             ensureAudio();
-            gameState = STATE.MENU;
+            // Check if the winner qualifies for leaderboard
+            if (isTopTenScore(matchWinnerScore)) {
+                nameEntryText = '';
+                nameEntryCursorBlink = 0;
+                gameState = STATE.NAME_ENTRY;
+            } else {
+                gameState = STATE.MENU;
+            }
         }
+    } else if (gameState === STATE.NAME_ENTRY) {
+        // Handle name entry input - letters, numbers, backspace, enter
+        if (e.code === 'Enter') {
+            var finalName = nameEntryText.trim() || 'PLAYER';
+            addToLeaderboard(finalName, matchWinnerScore);
+            gameState = STATE.MENU;
+        } else if (e.code === 'Backspace') {
+            nameEntryText = nameEntryText.slice(0, -1);
+            e.preventDefault();
+        } else if (e.key && e.key.length === 1 && nameEntryText.length < 12) {
+            // Allow letters, numbers, spaces
+            var ch = e.key;
+            if (/[a-zA-Z0-9 ]/.test(ch)) {
+                nameEntryText += ch.toUpperCase();
+            }
+        }
+        // Prevent all default behavior during name entry
+        e.preventDefault();
+        return;
     }
 
-    if (e.code === 'Escape') {
-        if (gameState === STATE.PLAYING || gameState === STATE.COUNTDOWN || gameState === STATE.PAUSED) {
-            window.location.href = '../../index.html';
+    if (gameState !== STATE.NAME_ENTRY) {
+        if (e.code === 'Escape') {
+            if (gameState === STATE.PLAYING || gameState === STATE.COUNTDOWN || gameState === STATE.PAUSED) {
+                window.location.href = '../../index.html';
+            }
         }
-    }
-    if (e.code === 'KeyP') {
-        if (gameState === STATE.PLAYING || gameState === STATE.COUNTDOWN) {
-            stateBeforePause = gameState;
-            gameState = STATE.PAUSED;
-        } else if (gameState === STATE.PAUSED) {
-            gameState = stateBeforePause || STATE.PLAYING;
+        if (e.code === 'KeyP') {
+            if (gameState === STATE.PLAYING || gameState === STATE.COUNTDOWN) {
+                stateBeforePause = gameState;
+                gameState = STATE.PAUSED;
+            } else if (gameState === STATE.PAUSED) {
+                gameState = stateBeforePause || STATE.PLAYING;
+            }
         }
     }
 
@@ -344,6 +383,39 @@ function showNotification(text, color) {
     notifyTimer = 1.5;
 }
 
+// --- Leaderboard Functions ---
+function getLeaderboard() {
+    try {
+        var data = localStorage.getItem(LEADERBOARD_KEY);
+        if (data) {
+            var parsed = JSON.parse(data);
+            if (Array.isArray(parsed)) return parsed;
+        }
+    } catch(e) {}
+    return [];
+}
+
+function saveLeaderboard(board) {
+    try {
+        localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(board));
+    } catch(e) {}
+}
+
+function isTopTenScore(score) {
+    var board = getLeaderboard();
+    if (board.length < 10) return true;
+    return score > board[board.length - 1].score;
+}
+
+function addToLeaderboard(name, score) {
+    var board = getLeaderboard();
+    board.push({ name: name.toUpperCase(), score: score });
+    board.sort(function(a, b) { return b.score - a.score; });
+    if (board.length > 10) board = board.slice(0, 10);
+    saveLeaderboard(board);
+    return board;
+}
+
 function spawnPowerup() {
     var type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
     var margin = canvas.width * 0.22;
@@ -367,6 +439,8 @@ function startMatch(selection) {
     }
     p1Sets = 0;
     p2Sets = 0;
+    p1TotalPoints = 0;
+    p2TotalPoints = 0;
     currentSet = 1;
     p1AbilityCharge = 0;
     p2AbilityCharge = 0;
@@ -701,8 +775,8 @@ function update(dt) {
 
     // After scoring
     if (scored) {
-        if (scored === 1) p1Score++;
-        else p2Score++;
+        if (scored === 1) { p1Score++; p1TotalPoints++; }
+        else { p2Score++; p2TotalPoints++; }
 
         // Check set win (first to 11, win by 2)
         if ((p1Score >= WINNING_SCORE || p2Score >= WINNING_SCORE) &&
@@ -713,6 +787,14 @@ function update(dt) {
             // Check match win
             var setsToWin = Math.ceil(BEST_OF_SETS / 2);
             if (p1Sets >= setsToWin || p2Sets >= setsToWin) {
+                // Determine winner's total score
+                if (p1Sets > p2Sets) {
+                    matchWinnerScore = p1TotalPoints;
+                    matchWinnerLabel = 'Player 1';
+                } else {
+                    matchWinnerScore = p2TotalPoints;
+                    matchWinnerLabel = isVsAI ? 'AI' : 'Player 2';
+                }
                 gameState = STATE.MATCH_OVER;
                 playGameWin();
             } else {
@@ -968,7 +1050,6 @@ function drawGame() {
                     ctx.fillStyle = '#ff6600';
                     ctx.shadowColor = '#ff4400';
                     ctx.shadowBlur = 8;
-                } else {
                 } else {
                     ctx.fillStyle = '#8888dd';
                     ctx.shadowColor = '#6666bb';
@@ -1362,6 +1443,79 @@ function drawMenu() {
     var padY2 = ch * 0.5 + Math.sin(now * 1.3 + 1) * 40;
     drawNeonRect(20, padY1, padW, padH, '#44ff8855', 0);
     drawNeonRect(cw - 20 - padW, padY2, padW, padH, '#ff44aa55', 0);
+
+    // --- TOP 5 LEADERBOARD on menu ---
+    var menuBoard = getLeaderboard();
+    if (menuBoard.length > 0) {
+        var lbPanelW = Math.min(220, cw * 0.2);
+        var lbPanelH = Math.min(200, ch * 0.3);
+        var lbPanelX = cw - lbPanelW - 30;
+        var lbPanelY = ch * 0.35;
+
+        // Panel background
+        ctx.save();
+        ctx.fillStyle = 'rgba(8, 8, 30, 0.8)';
+        ctx.strokeStyle = 'rgba(100, 100, 200, 0.3)';
+        ctx.lineWidth = 1;
+        var lbCR = 8;
+        ctx.beginPath();
+        ctx.moveTo(lbPanelX + lbCR, lbPanelY);
+        ctx.lineTo(lbPanelX + lbPanelW - lbCR, lbPanelY);
+        ctx.arcTo(lbPanelX + lbPanelW, lbPanelY, lbPanelX + lbPanelW, lbPanelY + lbCR, lbCR);
+        ctx.lineTo(lbPanelX + lbPanelW, lbPanelY + lbPanelH - lbCR);
+        ctx.arcTo(lbPanelX + lbPanelW, lbPanelY + lbPanelH, lbPanelX + lbPanelW - lbCR, lbPanelY + lbPanelH, lbCR);
+        ctx.lineTo(lbPanelX + lbCR, lbPanelY + lbPanelH);
+        ctx.arcTo(lbPanelX, lbPanelY + lbPanelH, lbPanelX, lbPanelY + lbPanelH - lbCR, lbCR);
+        ctx.lineTo(lbPanelX, lbPanelY + lbCR);
+        ctx.arcTo(lbPanelX, lbPanelY, lbPanelX + lbCR, lbPanelY, lbCR);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        // Title
+        var lbTitleSize = Math.min(16, cw * 0.015);
+        drawNeonText('TOP 5', lbPanelX + lbPanelW / 2, lbPanelY + 22, lbTitleSize, '#FFD700');
+
+        // Decorative line
+        ctx.save();
+        var lbLG = ctx.createLinearGradient(lbPanelX + 15, 0, lbPanelX + lbPanelW - 15, 0);
+        lbLG.addColorStop(0, 'rgba(255, 215, 0, 0)');
+        lbLG.addColorStop(0.5, 'rgba(255, 215, 0, 0.35)');
+        lbLG.addColorStop(1, 'rgba(255, 215, 0, 0)');
+        ctx.strokeStyle = lbLG;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(lbPanelX + 15, lbPanelY + 34);
+        ctx.lineTo(lbPanelX + lbPanelW - 15, lbPanelY + 34);
+        ctx.stroke();
+        ctx.restore();
+
+        // Entries (top 5)
+        var lbEntrySize = Math.min(13, cw * 0.012);
+        var lbEntryH = Math.min(26, (lbPanelH - 50) / 5);
+        var showCount = Math.min(5, menuBoard.length);
+        for (var lbi = 0; lbi < showCount; lbi++) {
+            var lbEY = lbPanelY + 48 + lbi * lbEntryH;
+            var lbRankCol, lbNameCol;
+            if (lbi === 0) { lbRankCol = '#FFD700'; lbNameCol = '#FFD700'; }
+            else if (lbi === 1) { lbRankCol = '#C0C0C0'; lbNameCol = '#C0C0C0'; }
+            else if (lbi === 2) { lbRankCol = '#CD7F32'; lbNameCol = '#CD7F32'; }
+            else { lbRankCol = '#777788'; lbNameCol = '#bbbbcc'; }
+
+            ctx.save();
+            ctx.font = 'bold ' + lbEntrySize + 'px "Segoe UI", Arial, sans-serif';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = lbRankCol;
+            ctx.fillText((lbi + 1) + '.', lbPanelX + 12, lbEY);
+            ctx.fillStyle = lbNameCol;
+            ctx.fillText(menuBoard[lbi].name, lbPanelX + 35, lbEY);
+            ctx.textAlign = 'right';
+            ctx.fillText(menuBoard[lbi].score.toString(), lbPanelX + lbPanelW - 12, lbEY);
+            ctx.restore();
+        }
+    }
 }
 
 function drawCountdown() {
@@ -1418,44 +1572,220 @@ function drawMatchOver() {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.restore();
 
+    var cw = canvas.width;
+    var ch = canvas.height;
     var winner = p1Sets > p2Sets ? 'Player 1' : (isVsAI ? 'AI' : 'Player 2');
     var winnerColor = p1Sets > p2Sets ? '#44ff88' : '#ff44aa';
 
-    drawNeonText('MATCH OVER!', canvas.width / 2, canvas.height * 0.22, 52, '#ffaa00');
+    // Left side: match result
+    var leftX = cw * 0.3;
 
-    // Winner text with extra glow
+    drawNeonText('MATCH OVER!', leftX, ch * 0.15, Math.min(48, cw * 0.04), '#ffaa00');
+
     ctx.save();
     ctx.shadowColor = winnerColor;
     ctx.shadowBlur = 30;
-    drawNeonText(winner + ' WINS!', canvas.width / 2, canvas.height * 0.36, 40, winnerColor);
+    drawNeonText(winner + ' WINS!', leftX, ch * 0.27, Math.min(36, cw * 0.032), winnerColor);
     ctx.restore();
 
-    drawNeonText('Sets: ' + p1Sets + ' - ' + p2Sets, canvas.width / 2, canvas.height * 0.48, 32, '#ffffff');
+    drawNeonText('Sets: ' + p1Sets + ' - ' + p2Sets, leftX, ch * 0.37, Math.min(28, cw * 0.025), '#ffffff');
+    drawNeonText('Total Points: ' + matchWinnerScore, leftX, ch * 0.45, Math.min(22, cw * 0.02), '#aaaacc');
 
     // Trophy symbol
     ctx.save();
-    ctx.font = '56px "Segoe UI", Arial, sans-serif';
+    ctx.font = Math.min(52, cw * 0.045) + 'px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.shadowColor = '#ffcc00';
     ctx.shadowBlur = 25;
     ctx.fillStyle = '#ffcc00';
-    ctx.fillText('\u{1F3C6}', canvas.width / 2, canvas.height * 0.60);
+    ctx.fillText('\u{1F3C6}', leftX, ch * 0.56);
     ctx.restore();
 
     // Victory particles
     if (Math.random() < 0.15) {
         spawnParticles(
-            canvas.width * 0.2 + Math.random() * canvas.width * 0.6,
-            canvas.height * 0.3 + Math.random() * canvas.height * 0.4,
+            cw * 0.2 + Math.random() * cw * 0.6,
+            ch * 0.3 + Math.random() * ch * 0.4,
             winnerColor, 2, 4
         );
     }
 
+    // Right side: leaderboard
+    var rightX = cw * 0.72;
+    drawLeaderboardPanel(rightX, ch * 0.1, Math.min(340, cw * 0.32), ch * 0.75, 10);
+
+    // Continue prompt
     var alpha2 = 0.4 + Math.sin(Date.now() * 0.004) * 0.3;
     ctx.save();
     ctx.globalAlpha = alpha2;
-    drawNeonText('Press SPACE or ENTER for menu', canvas.width / 2, canvas.height * 0.78, 18, '#666699');
+    drawNeonText('Press SPACE or ENTER to continue', cw / 2, ch * 0.92, Math.min(18, cw * 0.016), '#666699');
+    ctx.restore();
+}
+
+function drawLeaderboardPanel(cx, y, panelW, panelH, count) {
+    var board = getLeaderboard();
+    var cw = canvas.width;
+
+    // Panel background
+    var panelX = cx - panelW / 2;
+    ctx.save();
+    ctx.fillStyle = 'rgba(8, 8, 30, 0.85)';
+    ctx.strokeStyle = 'rgba(100, 100, 200, 0.35)';
+    ctx.lineWidth = 1.5;
+    var cr = 10;
+    ctx.beginPath();
+    ctx.moveTo(panelX + cr, y);
+    ctx.lineTo(panelX + panelW - cr, y);
+    ctx.arcTo(panelX + panelW, y, panelX + panelW, y + cr, cr);
+    ctx.lineTo(panelX + panelW, y + panelH - cr);
+    ctx.arcTo(panelX + panelW, y + panelH, panelX + panelW - cr, y + panelH, cr);
+    ctx.lineTo(panelX + cr, y + panelH);
+    ctx.arcTo(panelX, y + panelH, panelX, y + panelH - cr, cr);
+    ctx.lineTo(panelX, y + cr);
+    ctx.arcTo(panelX, y, panelX + cr, y, cr);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    // Title
+    var titleSize = Math.min(22, cw * 0.02);
+    drawNeonText('LEADERBOARD', cx, y + 28, titleSize, '#FFD700');
+
+    // Decorative line under title
+    ctx.save();
+    var lg = ctx.createLinearGradient(panelX + 20, 0, panelX + panelW - 20, 0);
+    lg.addColorStop(0, 'rgba(255, 215, 0, 0)');
+    lg.addColorStop(0.5, 'rgba(255, 215, 0, 0.4)');
+    lg.addColorStop(1, 'rgba(255, 215, 0, 0)');
+    ctx.strokeStyle = lg;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 20, y + 42);
+    ctx.lineTo(panelX + panelW - 20, y + 42);
+    ctx.stroke();
+    ctx.restore();
+
+    // Column headers
+    var headerY = y + 60;
+    var fontSize = Math.min(14, cw * 0.013);
+    ctx.save();
+    ctx.font = 'bold ' + fontSize + 'px "Segoe UI", Arial, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#7777aa';
+    ctx.textAlign = 'left';
+    ctx.fillText('#', panelX + 15, headerY);
+    ctx.fillText('NAME', panelX + 45, headerY);
+    ctx.textAlign = 'right';
+    ctx.fillText('SCORE', panelX + panelW - 15, headerY);
+    ctx.restore();
+
+    // Entries
+    var entryH = Math.min(30, (panelH - 80) / count);
+    var entryFontSize = Math.min(15, cw * 0.014);
+    for (var i = 0; i < count; i++) {
+        var ey = headerY + 20 + i * entryH;
+        var rankColor, nameColor;
+
+        if (i === 0) { rankColor = '#FFD700'; nameColor = '#FFD700'; }       // Gold
+        else if (i === 1) { rankColor = '#C0C0C0'; nameColor = '#C0C0C0'; }  // Silver
+        else if (i === 2) { rankColor = '#CD7F32'; nameColor = '#CD7F32'; }   // Bronze
+        else { rankColor = '#888899'; nameColor = '#ccccdd'; }
+
+        ctx.save();
+        ctx.font = 'bold ' + entryFontSize + 'px "Segoe UI", Arial, sans-serif';
+        ctx.textBaseline = 'middle';
+
+        if (i < board.length) {
+            // Rank
+            ctx.textAlign = 'left';
+            ctx.fillStyle = rankColor;
+            ctx.fillText((i + 1) + '.', panelX + 15, ey);
+            // Name
+            ctx.fillStyle = nameColor;
+            ctx.fillText(board[i].name, panelX + 45, ey);
+            // Score
+            ctx.textAlign = 'right';
+            ctx.fillStyle = nameColor;
+            ctx.fillText(board[i].score.toString(), panelX + panelW - 15, ey);
+        } else {
+            // Empty slot
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#333355';
+            ctx.fillText((i + 1) + '.', panelX + 15, ey);
+            ctx.fillText('---', panelX + 45, ey);
+            ctx.textAlign = 'right';
+            ctx.fillText('-', panelX + panelW - 15, ey);
+        }
+        ctx.restore();
+    }
+}
+
+function drawNameEntry() {
+    drawGame();
+
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    var cw = canvas.width;
+    var ch = canvas.height;
+
+    // Congratulations
+    drawNeonText('NEW HIGH SCORE!', cw / 2, ch * 0.2, Math.min(44, cw * 0.04), '#FFD700');
+    drawNeonText('Score: ' + matchWinnerScore, cw / 2, ch * 0.3, Math.min(30, cw * 0.028), '#ffffff');
+
+    // Name entry prompt
+    drawNeonText('ENTER YOUR NAME:', cw / 2, ch * 0.42, Math.min(24, cw * 0.022), '#aaaacc');
+
+    // Name input box
+    var boxW = Math.min(360, cw * 0.35);
+    var boxH = Math.min(50, ch * 0.06);
+    var boxX = cw / 2 - boxW / 2;
+    var boxY = ch * 0.48;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(15, 15, 40, 0.9)';
+    ctx.strokeStyle = '#44ccff';
+    ctx.shadowColor = '#44ccff';
+    ctx.shadowBlur = 8;
+    ctx.lineWidth = 2;
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+    ctx.restore();
+
+    // Typed text
+    var displayText = nameEntryText;
+    nameEntryCursorBlink += 0.06;
+    var showCursor = Math.sin(nameEntryCursorBlink * 3) > 0;
+    if (showCursor) displayText += '_';
+
+    var textSize = Math.min(28, cw * 0.026);
+    ctx.save();
+    ctx.font = 'bold ' + textSize + 'px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#44ffcc';
+    ctx.shadowColor = '#44ffcc';
+    ctx.shadowBlur = 6;
+    ctx.fillText(displayText, cw / 2, boxY + boxH / 2);
+    ctx.restore();
+
+    // Instructions
+    var alpha3 = 0.5 + Math.sin(Date.now() * 0.003) * 0.2;
+    ctx.save();
+    ctx.globalAlpha = alpha3;
+    drawNeonText('Type your name and press ENTER to confirm', cw / 2, ch * 0.62, Math.min(16, cw * 0.015), '#666699');
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = '#444466';
+    ctx.font = Math.min(13, cw * 0.012) + 'px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Max 12 characters  |  Letters, numbers, spaces', cw / 2, ch * 0.67);
     ctx.restore();
 }
 
@@ -1524,6 +1854,10 @@ function gameLoop(timestamp) {
             drawMatchOver();
             // Keep spawning victory particles
             updateParticles(dt);
+            break;
+        case STATE.NAME_ENTRY:
+            drawNameEntry();
+            backLink.style.display = 'none';
             break;
         case STATE.PAUSED:
             drawPaused();
