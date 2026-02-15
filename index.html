@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Jake's Arcade</title>
 <style>
@@ -177,6 +177,45 @@
     pointer-events: none;
   }
 
+  .card-leaderboard {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .card-leaderboard h4 {
+    font-family: 'Press Start 2P', monospace;
+    font-size: 9px;
+    color: #fbbf24;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+
+  .lb-entry {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 3px 0;
+    font-size: 12px;
+    color: #94a3b8;
+  }
+
+  .lb-entry:first-of-type { color: #fbbf24; }
+  .lb-entry:nth-of-type(2) { color: #c0c0c0; }
+  .lb-entry:nth-of-type(3) { color: #cd7f32; }
+
+  .lb-rank { font-weight: 700; min-width: 20px; }
+  .lb-name { flex: 1; margin: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-score { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .lb-empty {
+    font-size: 11px;
+    color: #475569;
+    font-style: italic;
+  }
+
   .coming-soon .card-thumb-wrapper { opacity: 0.4; }
   .coming-soon .card-body { opacity: 0.5; }
   .coming-soon .play-btn {
@@ -209,7 +248,7 @@
 
 <div class="games-grid">
 
-  <a href="games/zombie-siege/index.html" class="game-card">
+  <a href="games/zombie-siege/index.html" class="game-card" data-lb-key="zombieSiegeLeaderboard" data-lb-type="score">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #1a1a2e, #16213e);">
         <span>&#x1F9DF;</span>
@@ -220,10 +259,11 @@
       <p>Survive endless waves of zombies. 4 weapons, boss fights, and chaos.</p>
       <span class="card-tag tag-action">Action</span>
       <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
     </div>
   </a>
 
-  <a href="games/pong-championship/index.html" class="game-card">
+  <a href="games/pong-championship/index.html" class="game-card" data-lb-key="pongLeaderboard" data-lb-type="wins">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #0f172a, #1e293b);">
         <span>&#x1F3D3;</span>
@@ -234,10 +274,11 @@
       <p>Enhanced Pong with special abilities, power-ups, and tournament mode.</p>
       <span class="card-tag tag-arcade">Arcade</span>
       <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
     </div>
   </a>
 
-  <a href="games/tower-defence/index.html" class="game-card">
+  <a href="games/tower-defence/index.html" class="game-card" data-lb-key="towerDefenceLeaderboard" data-lb-type="score">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #14532d, #064e3b);">
         <span>&#x1F3F0;</span>
@@ -248,10 +289,11 @@
       <p>Place towers along the path to stop waves of enemies. Upgrade and survive.</p>
       <span class="card-tag tag-strategy">Strategy</span>
       <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
     </div>
   </a>
 
-  <a href="games/dungeon-crawler/index.html" class="game-card">
+  <a href="games/dungeon-crawler/index.html" class="game-card" data-lb-key="dungeonCrawlerLeaderboard" data-lb-type="dungeon">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #312e81, #1e1b4b);">
         <span>&#x1F5E1;</span>
@@ -262,10 +304,11 @@
       <p>Explore random dungeons, fight monsters, collect loot, level up.</p>
       <span class="card-tag tag-rpg">RPG</span>
       <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
     </div>
   </a>
 
-  <a href="games/space-invaders/index.html" class="game-card">
+  <a href="games/space-invaders/index.html" class="game-card" data-lb-key="spaceInvadersLeaderboard" data-lb-type="score">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #0c0a1a, #1a0a2e);">
         <span>&#x1F47E;</span>
@@ -276,10 +319,11 @@
       <p>Classic space invaders with modern power-ups, bosses, and combos.</p>
       <span class="card-tag tag-arcade">Arcade</span>
       <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
     </div>
   </a>
 
-  <a href="games/stick-fighter/index.html" class="game-card">
+  <a href="games/stick-fighter/index.html" class="game-card" data-lb-key="stickFighterLeaderboard" data-lb-type="wins">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #451a03, #78350f);">
         <span>&#x1F94A;</span>
@@ -290,10 +334,11 @@
       <p>Local 2-player stick figure fighting with combos and special moves.</p>
       <span class="card-tag tag-fighting">Fighting</span>
       <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
     </div>
   </a>
 
-  <a href="games/platformer-quest/index.html" class="game-card">
+  <a href="games/platformer-quest/index.html" class="game-card" data-lb-key="platformerLeaderboard" data-lb-type="score">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #0e4429, #006d32);">
         <span>&#x1F3AE;</span>
@@ -304,10 +349,11 @@
       <p>Side-scrolling platformer with wall jumps, collectables, and boss fights.</p>
       <span class="card-tag tag-platformer">Platformer</span>
       <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
     </div>
   </a>
 
-  <a href="games/escape-room/index.html" class="game-card">
+  <a href="games/escape-room/index.html" class="game-card" data-lb-key="escapeRoomLeaderboard" data-lb-type="escape">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #134e4a, #064e3b);">
         <span>&#x1F510;</span>
@@ -318,10 +364,11 @@
       <p>Point-and-click puzzle rooms with hidden clues and logic puzzles.</p>
       <span class="card-tag tag-puzzle">Puzzle</span>
       <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
     </div>
   </a>
 
-  <a href="games/endless-runner/index.html" class="game-card">
+  <a href="games/endless-runner/index.html" class="game-card" data-lb-key="endlessRunnerLeaderboard" data-lb-type="score">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #7c2d12, #9a3412);">
         <span>&#x1F3C3;</span>
@@ -332,10 +379,11 @@
       <p>Side-scrolling runner with obstacles, power-ups, and increasing speed.</p>
       <span class="card-tag tag-runner">Runner</span>
       <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
     </div>
   </a>
 
-  <a href="games/tank-wars/index.html" class="game-card">
+  <a href="games/tank-wars/index.html" class="game-card" data-lb-key="tankWarsLeaderboard" data-lb-type="wins">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #3f3f46, #27272a);">
         <span>&#x1F3AF;</span>
@@ -346,6 +394,7 @@
       <p>Turn-based tank battles with destructible terrain and different ammo types.</p>
       <span class="card-tag tag-strategy">Strategy</span>
       <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
     </div>
   </a>
 
@@ -355,5 +404,52 @@
   Jake's Arcade &copy; 2026
 </footer>
 
+<script>
+document.querySelectorAll('.game-card[data-lb-key]').forEach(card => {
+  const key = card.dataset.lbKey;
+  const type = card.dataset.lbType;
+  const container = card.querySelector('.card-leaderboard');
+  if (!container) return;
+
+  let entries = [];
+  try { entries = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
+  if (!Array.isArray(entries) || entries.length === 0) {
+    container.innerHTML = '<h4>LEADERBOARD</h4><div class="lb-empty">No scores yet — be the first!</div>';
+    return;
+  }
+
+  const top3 = entries.slice(0, 3);
+  let html = '<h4>LEADERBOARD</h4>';
+
+  top3.forEach((e, i) => {
+    let scoreText;
+    if (type === 'escape') {
+      const rooms = e.rooms || 0;
+      if (rooms >= 5) {
+        const s = Math.floor(e.time || 0);
+        const m = Math.floor(s / 60);
+        const sec = s % 60;
+        scoreText = m + ':' + (sec < 10 ? '0' : '') + sec;
+      } else {
+        scoreText = rooms + '/5 rooms';
+      }
+    } else if (type === 'dungeon') {
+      scoreText = 'F' + (e.floor || '?') + ' / ' + (e.score || 0);
+    } else if (type === 'wins') {
+      scoreText = (e.score || 0) + ' wins';
+    } else {
+      scoreText = (e.score || 0).toLocaleString();
+    }
+
+    html += '<div class="lb-entry">' +
+      '<span class="lb-rank">' + (i + 1) + '.</span>' +
+      '<span class="lb-name">' + (e.name || 'PLAYER') + '</span>' +
+      '<span class="lb-score">' + scoreText + '</span>' +
+      '</div>';
+  });
+
+  container.innerHTML = html;
+});
+</script>
 </body>
 </html>
