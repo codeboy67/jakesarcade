@@ -1278,17 +1278,111 @@ function drawMenu() {
         drawNeonText(menuOptions[i], cw / 2, yPos, size, color);
     }
 
-    // Instructions
-    var instY = ch * 0.78;
-    var instSize = Math.min(14, cw * 0.013);
-    ctx.fillStyle = '#444466';
-    ctx.font = instSize + 'px "Segoe UI", Arial, sans-serif';
+    // --- Menu navigation hint (above controls panel) ---
+    var navHintSize = Math.max(14, Math.min(16, cw * 0.015));
+    ctx.fillStyle = '#666688';
+    ctx.font = navHintSize + 'px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('W/S or \u2191/\u2193 to select  |  SPACE or ENTER to start', cw / 2, instY);
-    ctx.fillText('Best of 3 sets  |  First to 11 (win by 2)', cw / 2, instY + instSize * 1.6);
-    ctx.fillText('P1: W/S to move, SPACE for ability', cw / 2, instY + instSize * 3.2);
-    ctx.fillText('P2: \u2191/\u2193 to move, ENTER for ability', cw / 2, instY + instSize * 4.8);
-    ctx.fillText('P to pause | ESC for main menu', cw / 2, instY + instSize * 6.4);
+    ctx.fillText('W/S or \u2191/\u2193 to select  |  SPACE or ENTER to start', cw / 2, ch * 0.68);
+    ctx.fillText('Best of 3 sets  |  First to 11 (win by 2)', cw / 2, ch * 0.68 + navHintSize * 1.5);
+
+    // --- CONTROLS PANEL ---
+    var panelW = Math.min(500, cw * 0.55);
+    var panelH = 220;
+    var panelX = cw / 2 - panelW / 2;
+    var panelY = ch * 0.74;
+    var lineH = 26;
+    var keyFontSize = Math.max(16, Math.min(18, cw * 0.017));
+    var descFontSize = Math.max(14, Math.min(16, cw * 0.015));
+    var headingFontSize = Math.max(18, Math.min(22, cw * 0.02));
+
+    // Semi-transparent dark panel background
+    ctx.save();
+    ctx.fillStyle = 'rgba(8, 8, 24, 0.82)';
+    ctx.strokeStyle = 'rgba(100, 100, 180, 0.3)';
+    ctx.lineWidth = 1.5;
+    // Rounded rectangle
+    var cornerR = 10;
+    ctx.beginPath();
+    ctx.moveTo(panelX + cornerR, panelY);
+    ctx.lineTo(panelX + panelW - cornerR, panelY);
+    ctx.arcTo(panelX + panelW, panelY, panelX + panelW, panelY + cornerR, cornerR);
+    ctx.lineTo(panelX + panelW, panelY + panelH - cornerR);
+    ctx.arcTo(panelX + panelW, panelY + panelH, panelX + panelW - cornerR, panelY + panelH, cornerR);
+    ctx.lineTo(panelX + cornerR, panelY + panelH);
+    ctx.arcTo(panelX, panelY + panelH, panelX, panelY + panelH - cornerR, cornerR);
+    ctx.lineTo(panelX, panelY + cornerR);
+    ctx.arcTo(panelX, panelY, panelX + cornerR, panelY, cornerR);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    // "CONTROLS" heading with gold neon style
+    var headY = panelY + 28;
+    drawNeonText('CONTROLS', cw / 2, headY, headingFontSize, '#FFD700');
+
+    // Decorative line under heading
+    ctx.save();
+    var lineGrad2 = ctx.createLinearGradient(panelX + 30, 0, panelX + panelW - 30, 0);
+    lineGrad2.addColorStop(0, 'rgba(255, 215, 0, 0)');
+    lineGrad2.addColorStop(0.5, 'rgba(255, 215, 0, 0.45)');
+    lineGrad2.addColorStop(1, 'rgba(255, 215, 0, 0)');
+    ctx.strokeStyle = lineGrad2;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 30, headY + 14);
+    ctx.lineTo(panelX + panelW - 30, headY + 14);
+    ctx.stroke();
+    ctx.restore();
+
+    // Control lines - two columns (key | description)
+    var controlStartY = headY + 32;
+    var colKeyX = cw / 2 - panelW * 0.2;   // keys column (right-aligned)
+    var colDescX = cw / 2 - panelW * 0.12;  // description column (left-aligned)
+
+    var controls = [
+        { key: 'W / S', desc: 'Move paddle (Player 1)', keyCol: '#FFD700', descCol: '#44ff88' },
+        { key: '\u2191 / \u2193', desc: 'Move paddle (Player 2)', keyCol: '#FFD700', descCol: '#ff44aa' },
+        { key: 'SPACE', desc: 'Special ability (Player 1)', keyCol: '#FFD700', descCol: '#44ff88' },
+        { key: 'ENTER', desc: 'Special ability (Player 2)', keyCol: '#FFD700', descCol: '#ff44aa' },
+        { key: 'P', desc: 'Pause game', keyCol: '#FFD700', descCol: '#ccccdd' },
+        { key: 'ESC', desc: 'Main menu', keyCol: '#FFD700', descCol: '#ccccdd' }
+    ];
+
+    for (var ci = 0; ci < controls.length; ci++) {
+        var cy = controlStartY + ci * lineH;
+        var ctrl = controls[ci];
+
+        // Key label (gold, bold)
+        ctx.save();
+        ctx.font = 'bold ' + keyFontSize + 'px "Segoe UI", Arial, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = ctrl.keyCol;
+        ctx.shadowColor = ctrl.keyCol;
+        ctx.shadowBlur = 6;
+        ctx.fillText(ctrl.key, colKeyX, cy);
+        ctx.restore();
+
+        // Separator dash
+        ctx.save();
+        ctx.font = descFontSize + 'px "Segoe UI", Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#555577';
+        ctx.fillText('\u2014', colKeyX + (colDescX - colKeyX) / 2, cy);
+        ctx.restore();
+
+        // Description (colour-coded)
+        ctx.save();
+        ctx.font = descFontSize + 'px "Segoe UI", Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = ctrl.descCol;
+        ctx.fillText(ctrl.desc, colDescX, cy);
+        ctx.restore();
+    }
 
     // Decorative animated ball
     var ballX = cw / 2 + Math.sin(now * 2) * cw * 0.12;
