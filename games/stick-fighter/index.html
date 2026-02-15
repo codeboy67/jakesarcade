@@ -1330,11 +1330,11 @@ function drawMenu() {
 
     // Menu options
     const menuItems = ['1 Player vs CPU', '2 Players'];
-    const startY = h * 0.62;
+    const startY = h * 0.55;
     ctx.font = `bold ${Math.min(28, w * 0.025)}px Arial`;
 
     for (let i = 0; i < menuItems.length; i++) {
-        const y = startY + i * 55;
+        const y = startY + i * 50;
         const selected = menuSelection === i;
 
         if (selected) {
@@ -1351,10 +1351,174 @@ function drawMenu() {
         }
     }
 
-    // Controls hint
-    ctx.fillStyle = '#555';
-    ctx.font = `${Math.min(16, w * 0.013)}px Arial`;
-    ctx.fillText('Use W/S or Up/Down to select, Enter or Space to confirm', w / 2, h * 0.88);
+    // Navigation hint
+    ctx.fillStyle = '#666';
+    ctx.font = `${Math.min(15, w * 0.013)}px Arial`;
+    ctx.fillText('Use W/S or Up/Down to select, Enter or Space to confirm', w / 2, h * 0.95);
+
+    // ---- CONTROLS PANEL ----
+    const controlsFontSize = Math.max(14, Math.min(18, w * 0.014, h * 0.022));
+    const headingFontSize = Math.max(18, Math.min(24, w * 0.02));
+    const lineHeight = controlsFontSize + 8;
+    const colWidth = Math.min(320, w * 0.34);
+
+    // Panel dimensions - positioned below menu items with room to breathe
+    const panelW = colWidth * 2 + 60;
+    const panelH = lineHeight * 8 + headingFontSize + 50;
+    const panelX = w / 2 - panelW / 2;
+    // Start panel 80px below last menu item, but clamp so it fits on screen
+    const panelTopIdeal = startY + 50 + 40;
+    const panelY = Math.min(panelTopIdeal, h - panelH - 30);
+
+    // Semi-transparent dark panel background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.beginPath();
+    const r = 12;
+    ctx.moveTo(panelX + r, panelY);
+    ctx.lineTo(panelX + panelW - r, panelY);
+    ctx.quadraticCurveTo(panelX + panelW, panelY, panelX + panelW, panelY + r);
+    ctx.lineTo(panelX + panelW, panelY + panelH - r);
+    ctx.quadraticCurveTo(panelX + panelW, panelY + panelH, panelX + panelW - r, panelY + panelH);
+    ctx.lineTo(panelX + r, panelY + panelH);
+    ctx.quadraticCurveTo(panelX, panelY + panelH, panelX, panelY + panelH - r);
+    ctx.lineTo(panelX, panelY + r);
+    ctx.quadraticCurveTo(panelX, panelY, panelX + r, panelY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Panel border
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // "CONTROLS" heading
+    ctx.textAlign = 'center';
+    ctx.font = `bold ${headingFontSize}px Arial`;
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText('CONTROLS', w / 2, panelY + headingFontSize + 14);
+
+    // Divider line under heading
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 20, panelY + headingFontSize + 26);
+    ctx.lineTo(panelX + panelW - 20, panelY + headingFontSize + 26);
+    ctx.stroke();
+
+    const contentTopY = panelY + headingFontSize + 46;
+
+    // Helper: draw a control line with gold key and white description
+    function drawControlLine(x, y, key, desc, align) {
+        ctx.textAlign = align;
+        ctx.font = `bold ${controlsFontSize}px Arial`;
+        ctx.fillStyle = '#FFD700';
+        const keyText = key;
+        const keyWidth = ctx.measureText(keyText).width;
+        if (align === 'left') {
+            ctx.fillText(keyText, x, y);
+            ctx.font = `${controlsFontSize}px Arial`;
+            ctx.fillStyle = '#ddd';
+            ctx.fillText('  ' + desc, x + keyWidth, y);
+        } else {
+            // Right-aligned: draw desc first then key
+            ctx.font = `${controlsFontSize}px Arial`;
+            ctx.fillStyle = '#ddd';
+            const descWidth = ctx.measureText(desc + '  ').width;
+            ctx.textAlign = 'right';
+            ctx.fillText(desc + '  ', x - 0, y);
+            ctx.font = `bold ${controlsFontSize}px Arial`;
+            ctx.fillStyle = '#FFD700';
+            ctx.fillText(keyText, x - descWidth, y);
+        }
+    }
+
+    // --- Player 1 column (left) ---
+    const p1X = panelX + 30;
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${controlsFontSize + 1}px Arial`;
+    ctx.fillStyle = '#4488ff';
+    ctx.fillText('PLAYER 1', p1X, contentTopY);
+
+    const p1Controls = [
+        ['A / D', 'Move left / right'],
+        ['W', 'Jump'],
+        ['S', 'Crouch'],
+        ['F', 'Punch'],
+        ['G', 'Kick'],
+        ['R', 'Special attack'],
+    ];
+    for (let i = 0; i < p1Controls.length; i++) {
+        drawControlLine(p1X, contentTopY + (i + 1) * lineHeight, p1Controls[i][0], p1Controls[i][1], 'left');
+    }
+
+    // --- Player 2 column (right) ---
+    const p2X = panelX + panelW / 2 + 30;
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${controlsFontSize + 1}px Arial`;
+    ctx.fillStyle = '#ff4444';
+    ctx.fillText('PLAYER 2', p2X, contentTopY);
+
+    const p2Controls = [
+        ['Arrows', 'Move left / right'],
+        ['Up', 'Jump'],
+        ['Down', 'Crouch'],
+        ['K', 'Punch'],
+        ['L', 'Kick'],
+        ['O', 'Special attack'],
+    ];
+    for (let i = 0; i < p2Controls.length; i++) {
+        drawControlLine(p2X, contentTopY + (i + 1) * lineHeight, p2Controls[i][0], p2Controls[i][1], 'left');
+    }
+
+    // --- Divider above general controls ---
+    const generalY = contentTopY + 7 * lineHeight + 6;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 20, generalY - lineHeight + 6);
+    ctx.lineTo(panelX + panelW - 20, generalY - lineHeight + 6);
+    ctx.stroke();
+
+    // General controls centred on one line
+    ctx.textAlign = 'center';
+    ctx.font = `bold ${controlsFontSize}px Arial`;
+    ctx.fillStyle = '#FFD700';
+    const genLabel1 = 'P';
+    const genDesc1 = ' Pause';
+    const genLabel2 = 'ESC';
+    const genDesc2 = ' Main Menu';
+    const spacer = '        ';
+
+    // Measure full line to centre it
+    ctx.font = `bold ${controlsFontSize}px Arial`;
+    const l1w = ctx.measureText(genLabel1).width;
+    ctx.font = `${controlsFontSize}px Arial`;
+    const d1w = ctx.measureText(genDesc1).width;
+    const spw = ctx.measureText(spacer).width;
+    ctx.font = `bold ${controlsFontSize}px Arial`;
+    const l2w = ctx.measureText(genLabel2).width;
+    ctx.font = `${controlsFontSize}px Arial`;
+    const d2w = ctx.measureText(genDesc2).width;
+
+    const totalW = l1w + d1w + spw + l2w + d2w;
+    let curX = w / 2 - totalW / 2;
+
+    ctx.textAlign = 'left';
+    ctx.font = `bold ${controlsFontSize}px Arial`;
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText(genLabel1, curX, generalY);
+    curX += l1w;
+    ctx.font = `${controlsFontSize}px Arial`;
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(genDesc1, curX, generalY);
+    curX += d1w + spw;
+    ctx.font = `bold ${controlsFontSize}px Arial`;
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText(genLabel2, curX, generalY);
+    curX += l2w;
+    ctx.font = `${controlsFontSize}px Arial`;
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(genDesc2, curX, generalY);
 
     ctx.textAlign = 'left';
 }
