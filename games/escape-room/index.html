@@ -40,7 +40,7 @@ function sfxHint(){playTone(440,0.2,'triangle',0.12);setTimeout(()=>playTone(550
 function sfxDoor(){playTone(150,0.4,'square',0.1);setTimeout(()=>playTone(120,0.3,'square',0.08),200);}
 
 // State
-let state='menu'; // menu, game, roomComplete
+let state='menu'; // menu, game, roomComplete, nameEntry
 let currentRoom=0;
 let mouseX=0,mouseY=0,cursorStyle='default';
 let inventory=[],selectedItem=-1;
@@ -58,6 +58,57 @@ let menuBtnHover='';
 let paused=false;
 let stateBeforePause='';
 
+// Leaderboard
+let leaderboard=JSON.parse(localStorage.getItem('escapeRoomLeaderboard')||'[]');
+let nameEntryText='';
+let nameEntryCursor=0;
+let nameEntryBlinkTimer=0;
+let pendingLeaderboardEntry=null;
+
+function getLeaderboard(){return leaderboard;}
+function saveLeaderboard(){localStorage.setItem('escapeRoomLeaderboard',JSON.stringify(leaderboard));}
+
+function calcPlayerScore(){
+// Score = total time across all completed rooms. Lower = better.
+// If not all rooms done, score is based on rooms completed (fewer completed = worse).
+let roomsDone=0,totalTime=0;
+for(let i=0;i<5;i++){
+const k='room'+i;
+if(roomCompleted[k]&&bestTimes[k]){roomsDone++;totalTime+=bestTimes[k];}
+}
+return {rooms:roomsDone,time:totalTime};
+}
+
+function isTopTenWorthy(score){
+if(leaderboard.length<10)return true;
+// Compare: more rooms = better, then lower time = better
+const worst=leaderboard[leaderboard.length-1];
+if(score.rooms>worst.rooms)return true;
+if(score.rooms===worst.rooms&&score.time<worst.time)return true;
+return false;
+}
+
+function addToLeaderboard(name,score){
+leaderboard.push({name:name,rooms:score.rooms,time:score.time});
+leaderboard.sort((a,b)=>{
+if(b.rooms!==a.rooms)return b.rooms-a.rooms;
+return a.time-b.time;
+});
+if(leaderboard.length>10)leaderboard.length=10;
+saveLeaderboard();
+}
+
+function formatTime(t){
+const s=Math.floor(t);
+const m=Math.floor(s/60),sec=s%60;
+return m+':'+(sec<10?'0':'')+sec;
+}
+
+function formatScoreDisplay(entry){
+if(entry.rooms>=5)return formatTime(entry.time);
+return entry.rooms+'/5 rooms';
+}
+
 canvas.addEventListener('mousemove',e=>{mouseX=e.clientX;mouseY=e.clientY;});
 canvas.addEventListener('click',e=>{
 initAudio();
@@ -68,6 +119,28 @@ handleClick(mouseX,mouseY);
 
 // Keyboard
 window.addEventListener('keydown',e=>{
+// Name entry mode captures all keys
+if(state==='nameEntry'){
+e.preventDefault();
+if(e.key==='Enter'){
+const name=(nameEntryText.trim()||'PLAYER').substring(0,12);
+addToLeaderboard(name,pendingLeaderboardEntry);
+pendingLeaderboardEntry=null;
+state='roomComplete';
+return;
+}
+if(e.key==='Backspace'){
+nameEntryText=nameEntryText.slice(0,-1);
+return;
+}
+if(e.key.length===1&&nameEntryText.length<12){
+// Allow letters, numbers, spaces
+if(/[a-zA-Z0-9 ]/.test(e.key)){
+nameEntryText+=e.key.toUpperCase();
+}
+}
+return;
+}
 if(e.key==='Escape'){
 if(state==='game'||state==='roomComplete'||paused){
 paused=false;
@@ -123,7 +196,16 @@ roomCompleted[key]=true;
 if(!bestTimes[key]||timer<bestTimes[key])bestTimes[key]=timer;
 localStorage.setItem('escapeRoomBest',JSON.stringify(bestTimes));
 localStorage.setItem('escapeRoomDone',JSON.stringify(roomCompleted));
+// Check leaderboard eligibility
+const score=calcPlayerScore();
+if(isTopTenWorthy(score)){
+pendingLeaderboardEntry=score;
+nameEntryText='';
+nameEntryCursor=0;
+state='nameEntry';
+}else{
 state='roomComplete';
+}
 }
 
 function showMessage(txt,dur){message=txt;messageTimer=dur||3;}
@@ -1279,24 +1361,32 @@ ctx.fillText('Not completed',W/2+cardW/2-15,cy+20);
 ctx.textAlign='left';
 }
 
-// ── CONTROLS PANEL ──────────────────────────────────────────────
-const cpW=Math.min(W*0.75,620);
-const cpX=W/2-cpW/2;
+// ── LEADERBOARD & CONTROLS side by side ──────────────────────
+const panelGap=20;
+const totalPanelW=Math.min(W*0.9,900);
+const lbPanelW=Math.min(totalPanelW*0.4,340);
+const cpW=totalPanelW-lbPanelW-panelGap;
+const panelStartX=W/2-totalPanelW/2;
+const lbPanelX=panelStartX;
+const cpX=panelStartX+lbPanelW+panelGap;
 const cpY=startY+5*(cardH+cardGap)+H*0.02;
 const cpPad=16;
-const ctrlFontSize=Math.max(16,Math.min(18,W*0.018));
-const headFontSize=Math.max(18,Math.min(22,W*0.022));
-const lineH=ctrlFontSize+12;
+const ctrlFontSize=Math.max(14,Math.min(16,W*0.016));
+const headFontSize=Math.max(16,Math.min(20,W*0.02));
+const lineH=ctrlFontSize+10;
 const controls=[
-{key:'Click',desc:'Interact with objects in the room'},
-{key:'Click item',desc:'Select from your inventory'},
+{key:'Click',desc:'Interact with objects'},
+{key:'Click item',desc:'Select from inventory'},
 {key:'Hint button',desc:'Get a clue (3 per room)'},
 {key:'P',desc:'Pause the game'},
 {key:'ESC',desc:'Return to main menu'}
 ];
 const cpH=cpPad+headFontSize+14+controls.length*lineH+cpPad;
 
-// Panel background — semi-transparent dark box with rounded feel
+// Leaderboard panel (left)
+drawLeaderboardPanel(lbPanelX,cpY,lbPanelW,5,'TOP 5 SCORES');
+
+// Controls panel (right) — semi-transparent dark box with rounded feel
 ctx.fillStyle='rgba(10,8,26,0.85)';
 ctx.beginPath();
 const cr=10;
@@ -1312,7 +1402,7 @@ ctx.strokeStyle='rgba(255,215,0,0.35)';ctx.lineWidth=2;ctx.stroke();
 ctx.fillStyle='#FFD700';
 ctx.font=`bold ${headFontSize}px 'Segoe UI', Arial`;
 ctx.textAlign='center';
-ctx.fillText('CONTROLS',W/2,cpY+cpPad+headFontSize-2);
+ctx.fillText('CONTROLS',cpX+cpW/2,cpY+cpPad+headFontSize-2);
 
 // Thin separator line under heading
 ctx.strokeStyle='rgba(255,215,0,0.25)';ctx.lineWidth=1;
@@ -1321,7 +1411,7 @@ ctx.beginPath();ctx.moveTo(cpX+cpPad,cpY+cpPad+headFontSize+6);ctx.lineTo(cpX+cp
 // Control entries — two-column: gold key on left, white description on right
 const entryStartY=cpY+cpPad+headFontSize+14;
 const keyColX=cpX+cpPad+10;
-const descColX=cpX+cpPad+Math.max(130,cpW*0.28);
+const descColX=cpX+cpPad+Math.max(110,cpW*0.32);
 for(let i=0;i<controls.length;i++){
 const ey=entryStartY+i*lineH+ctrlFontSize;
 // Key label in gold with a subtle pill background
@@ -1357,6 +1447,103 @@ ctx.fillStyle='#caa';ctx.font=`${Math.min(13,W*0.013)}px Arial`;
 ctx.textAlign='center';ctx.fillText('Reset Data',W/2,rby+20);ctx.textAlign='left';
 }
 
+function drawNameEntry(){
+const grad=ctx.createLinearGradient(0,0,0,H);
+grad.addColorStop(0,'#0a1a2e');grad.addColorStop(1,'#1a2a4e');
+ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+// Particles
+for(let i=0;i<15;i++){
+const t=performance.now()/1000;
+const px=W/2+Math.sin(t*2+i*0.7)*W*0.3,py=H*0.3+Math.cos(t*1.5+i*1.1)*H*0.2;
+ctx.fillStyle=`rgba(255,215,0,${0.3+Math.sin(t+i)*0.2})`;
+ctx.beginPath();ctx.arc(px,py,3+Math.sin(t+i)*2,0,Math.PI*2);ctx.fill();
+}
+// Title
+ctx.fillStyle='#FFD700';ctx.font=`bold ${Math.min(36,W*0.036)}px Arial`;
+ctx.textAlign='center';ctx.fillText('NEW HIGH SCORE!',W/2,H*0.2);
+// Room completion info
+ctx.fillStyle='#4f4';ctx.font=`${Math.min(20,W*0.02)}px Arial`;
+ctx.fillText(roomDefs[currentRoom].name+' escaped!',W/2,H*0.28);
+const ct=Math.floor(completionTime);
+ctx.fillStyle='#fff';ctx.font=`${Math.min(18,W*0.018)}px monospace`;
+ctx.fillText('Time: '+formatTime(ct),W/2,H*0.34);
+// Name entry prompt
+ctx.fillStyle='#8af';ctx.font=`bold ${Math.min(24,W*0.024)}px Arial`;
+ctx.fillText('ENTER YOUR NAME:',W/2,H*0.46);
+// Text input box
+const boxW=Math.min(W*0.5,360),boxH=50;
+const boxX=W/2-boxW/2,boxY=H*0.5;
+ctx.fillStyle='rgba(0,0,0,0.7)';ctx.fillRect(boxX,boxY,boxW,boxH);
+ctx.strokeStyle='#8af';ctx.lineWidth=3;ctx.strokeRect(boxX,boxY,boxW,boxH);
+// Typed text with blinking cursor
+nameEntryBlinkTimer+=0.05;
+const displayText=nameEntryText;
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(28,W*0.028)}px monospace`;
+const textWidth=ctx.measureText(displayText).width;
+ctx.fillText(displayText,W/2,boxY+boxH/2+10);
+// Blinking cursor
+if(Math.sin(nameEntryBlinkTimer*3)>0){
+const cursorX=W/2+textWidth/2+4;
+ctx.fillStyle='#8af';ctx.fillRect(cursorX,boxY+10,3,boxH-20);
+}
+// Instructions
+ctx.fillStyle='#aaa';ctx.font=`${Math.min(14,W*0.014)}px Arial`;
+ctx.fillText('Type your name (max 12 chars) and press ENTER',W/2,boxY+boxH+30);
+ctx.fillStyle='#888';ctx.font=`${Math.min(12,W*0.012)}px Arial`;
+ctx.fillText('Press ENTER with empty name for "PLAYER"',W/2,boxY+boxH+50);
+ctx.textAlign='left';
+}
+
+function drawLeaderboardPanel(x,y,w,maxEntries,title){
+const lb=getLeaderboard();
+const entryH=Math.min(26,H*0.03);
+const headH=Math.min(32,H*0.035);
+const padY=8;
+const totalH=padY+headH+padY+Math.max(maxEntries,lb.length>0?Math.min(lb.length,maxEntries):1)*entryH+padY;
+// Background
+ctx.fillStyle='rgba(10,8,26,0.85)';
+ctx.beginPath();
+const r=8;
+ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+ctx.lineTo(x+w,y+totalH-r);ctx.quadraticCurveTo(x+w,y+totalH,x+w-r,y+totalH);
+ctx.lineTo(x+r,y+totalH);ctx.quadraticCurveTo(x,y+totalH,x,y+totalH-r);
+ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);
+ctx.closePath();ctx.fill();
+ctx.strokeStyle='rgba(255,215,0,0.35)';ctx.lineWidth=2;ctx.stroke();
+// Title
+ctx.fillStyle='#FFD700';ctx.font=`bold ${Math.min(18,W*0.018)}px Arial`;
+ctx.textAlign='center';ctx.fillText(title||'LEADERBOARD',x+w/2,y+padY+headH-8);
+// Separator
+ctx.strokeStyle='rgba(255,215,0,0.25)';ctx.lineWidth=1;
+ctx.beginPath();ctx.moveTo(x+10,y+padY+headH);ctx.lineTo(x+w-10,y+padY+headH);ctx.stroke();
+// Entries
+const startEY=y+padY+headH+padY;
+if(lb.length===0){
+ctx.fillStyle='#888';ctx.font=`${Math.min(13,W*0.013)}px Arial`;
+ctx.fillText('No scores yet',x+w/2,startEY+entryH/2+4);
+}else{
+const rankColors=['#FFD700','#C0C0C0','#CD7F32'];
+for(let i=0;i<Math.min(lb.length,maxEntries);i++){
+const ey=startEY+i*entryH;
+const entry=lb[i];
+const color=i<3?rankColors[i]:'#ffffff';
+// Rank
+ctx.fillStyle=color;ctx.font=`bold ${Math.min(14,W*0.014)}px monospace`;
+ctx.textAlign='left';
+ctx.fillText((i+1)+'.',x+12,ey+entryH-6);
+// Name
+ctx.font=`${Math.min(14,W*0.014)}px Arial`;
+ctx.fillText(entry.name,x+42,ey+entryH-6);
+// Score
+ctx.textAlign='right';
+ctx.font=`${Math.min(13,W*0.013)}px monospace`;
+ctx.fillText(formatScoreDisplay(entry),x+w-12,ey+entryH-6);
+}
+}
+ctx.textAlign='left';
+return totalH;
+}
+
 function drawRoomComplete(){
 const grad=ctx.createLinearGradient(0,0,0,H);
 grad.addColorStop(0,'#0a2a0a');grad.addColorStop(1,'#1a4a1a');
@@ -1364,31 +1551,38 @@ ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
 // Particles
 for(let i=0;i<20;i++){
 const t=performance.now()/1000;
-const px=W/2+Math.sin(t*2+i*0.7)*W*0.3,py=H*0.3+Math.cos(t*1.5+i*1.1)*H*0.2;
+const px=W/2+Math.sin(t*2+i*0.7)*W*0.3,py=H*0.15+Math.cos(t*1.5+i*1.1)*H*0.1;
 ctx.fillStyle=`rgba(255,215,0,${0.3+Math.sin(t+i)*0.2})`;
 ctx.beginPath();ctx.arc(px,py,3+Math.sin(t+i)*2,0,Math.PI*2);ctx.fill();
 }
-ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(42,W*0.042)}px Arial`;
-ctx.textAlign='center';ctx.fillText('ROOM ESCAPED!',W/2,H*0.25);
-ctx.fillStyle='#4f4';ctx.font=`${Math.min(24,W*0.024)}px Arial`;
-ctx.fillText(roomDefs[currentRoom].name,W/2,H*0.35);
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(36,W*0.036)}px Arial`;
+ctx.textAlign='center';ctx.fillText('ROOM ESCAPED!',W/2,H*0.1);
+ctx.fillStyle='#4f4';ctx.font=`${Math.min(20,W*0.02)}px Arial`;
+ctx.fillText(roomDefs[currentRoom].name,W/2,H*0.16);
 const t=Math.floor(completionTime);
 const m=Math.floor(t/60),s=t%60;
-ctx.fillStyle='#fff';ctx.font=`${Math.min(28,W*0.028)}px monospace`;
-ctx.fillText('Time: '+m+':'+(s<10?'0':'')+s,W/2,H*0.45);
+ctx.fillStyle='#fff';ctx.font=`${Math.min(22,W*0.022)}px monospace`;
+ctx.fillText('Time: '+m+':'+(s<10?'0':'')+s,W/2,H*0.22);
 const bt=bestTimes['room'+currentRoom]?Math.floor(bestTimes['room'+currentRoom]):t;
 const bm=Math.floor(bt/60),bs=bt%60;
-ctx.fillStyle='#8af';ctx.font=`${Math.min(20,W*0.02)}px monospace`;
-ctx.fillText('Best: '+bm+':'+(bs<10?'0':'')+bs,W/2,H*0.52);
-// Buttons
-const btnW=180,btnH=45;
-const menuBx=W/2-btnW-20,menuBy=H*0.65;
-const nextBx=W/2+20,nextBy=H*0.65;
+ctx.fillStyle='#8af';ctx.font=`${Math.min(16,W*0.016)}px monospace`;
+ctx.fillText('Best: '+bm+':'+(bs<10?'0':'')+bs,W/2,H*0.27);
+// Leaderboard - centered
+const lbW=Math.min(W*0.5,380);
+const lbX=W/2-lbW/2;
+drawLeaderboardPanel(lbX,H*0.3,lbW,10,'TOP 10 LEADERBOARD');
+// Buttons - positioned at bottom
+const btnW=150,btnH=40;
+const btnY=H*0.9;
+const menuBx=W/2-btnW*1.5-15,menuBy=btnY;
+const nextBx=W/2-btnW/2,nextBy=btnY;
+const retBx=W/2+btnW*0.5+15,retBy=btnY;
 const mHover=mouseX>menuBx&&mouseX<menuBx+btnW&&mouseY>menuBy&&mouseY<menuBy+btnH;
 ctx.fillStyle=mHover?'rgba(80,80,120,0.9)':'rgba(40,40,80,0.8)';
 ctx.fillRect(menuBx,menuBy,btnW,btnH);
 ctx.strokeStyle='#88a';ctx.lineWidth=2;ctx.strokeRect(menuBx,menuBy,btnW,btnH);
-ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(18,W*0.018)}px Arial`;
+ctx.fillStyle='#fff';ctx.font=`bold ${Math.min(16,W*0.016)}px Arial`;
+ctx.textAlign='center';
 ctx.fillText('MENU',menuBx+btnW/2,menuBy+btnH/2+6);
 if(currentRoom<4){
 const nHover=mouseX>nextBx&&mouseX<nextBx+btnW&&mouseY>nextBy&&mouseY<nextBy+btnH;
@@ -1398,7 +1592,6 @@ ctx.strokeStyle='#4a4';ctx.lineWidth=2;ctx.strokeRect(nextBx,nextBy,btnW,btnH);
 ctx.fillStyle='#fff';ctx.fillText('NEXT ROOM',nextBx+btnW/2,nextBy+btnH/2+6);
 }
 // Retry
-const retBx=W/2-btnW/2,retBy=H*0.75;
 const rHover=mouseX>retBx&&mouseX<retBx+btnW&&mouseY>retBy&&mouseY<retBy+btnH;
 ctx.fillStyle=rHover?'rgba(120,100,40,0.9)':'rgba(80,60,20,0.8)';
 ctx.fillRect(retBx,retBy,btnW,btnH);
@@ -1431,28 +1624,33 @@ sfxClick();initRoom(i);return;
 }
 }
 // Reset — compute position to match drawMenu
-const cpW2=Math.min(W*0.75,620);
-const ctrlFontSize2=Math.max(16,Math.min(18,W*0.018));
-const headFontSize2=Math.max(18,Math.min(22,W*0.022));
-const lineH2=ctrlFontSize2+12;
+const ctrlFontSize2=Math.max(14,Math.min(16,W*0.016));
+const headFontSize2=Math.max(16,Math.min(20,W*0.02));
+const lineH2=ctrlFontSize2+10;
 const cpPad2=16;
 const cpY2=startY+5*(cardH+cardGap)+H*0.02;
 const cpH2=cpPad2+headFontSize2+14+5*lineH2+cpPad2;
 const rbx=W/2-50,rby=cpY2+cpH2+H*0.02,rbw=100,rbh=30;
 if(x>rbx&&x<rbx+rbw&&y>rby&&y<rby+rbh){
 if(confirm('Reset all progress?')){
-bestTimes={};roomCompleted={};
+bestTimes={};roomCompleted={};leaderboard=[];
 localStorage.removeItem('escapeRoomBest');localStorage.removeItem('escapeRoomDone');
+localStorage.removeItem('escapeRoomLeaderboard');
 sfxClick();
 }
 }
 return;
 }
+if(state==='nameEntry'){
+// Name entry is keyboard-only, ignore clicks
+return;
+}
 if(state==='roomComplete'){
-const btnW=180,btnH=45;
-const menuBx=W/2-btnW-20,menuBy=H*0.65;
-const nextBx=W/2+20,nextBy=H*0.65;
-const retBx=W/2-btnW/2,retBy=H*0.75;
+const btnW=150,btnH=40;
+const btnY=H*0.9;
+const menuBx=W/2-btnW*1.5-15,menuBy=btnY;
+const nextBx=W/2-btnW/2,nextBy=btnY;
+const retBx=W/2+btnW*0.5+15,retBy=btnY;
 if(x>menuBx&&x<menuBx+btnW&&y>menuBy&&y<menuBy+btnH){sfxClick();state='menu';return;}
 if(currentRoom<4&&x>nextBx&&x<nextBx+btnW&&y>nextBy&&y<nextBy+btnH){sfxClick();initRoom(currentRoom+1);return;}
 if(x>retBx&&x<retBx+btnW&&y>retBy&&y<retBy+btnH){sfxClick();initRoom(currentRoom);return;}
@@ -1530,6 +1728,10 @@ const tw=ctx.measureText(hoveredObj).width+20;
 ctx.fillRect(mouseX+10,mouseY-30,tw,24);
 ctx.fillStyle='#fff';ctx.font='13px Arial';ctx.fillText(hoveredObj,mouseX+20,mouseY-13);
 }
+}else if(state==='nameEntry'){
+backLink.style.display='none';
+drawNameEntry();
+cursorStyle='default';
 }else if(state==='roomComplete'){
 backLink.style.display='none';
 drawRoomComplete();
