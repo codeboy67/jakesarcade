@@ -1783,28 +1783,97 @@ function drawMenu() {
     ctx.font = '16px Courier New';
     ctx.fillText("Jake's Arcade", canvas.width / 2, canvas.height * 0.42 + 85);
 
-    // Instructions
-    const instrY = canvas.height * 0.65;
-    ctx.fillStyle = '#aaa';
-    ctx.font = '16px Courier New';
-    ctx.fillText('A/D or Arrow Keys to move', canvas.width / 2, instrY);
-    ctx.fillText('SPACE to shoot', canvas.width / 2, instrY + 28);
+    // --- CONTROLS PANEL ---
+    const cx = canvas.width / 2;
+    const panelTopY = canvas.height * 0.55;
+    const panelW = 340;
+    const headingH = 32;
+    const lineH = 30;
+    const controlLines = [
+        { key: 'A / D  or  Arrows', desc: 'Move ship' },
+        { key: 'SPACE', desc: 'Shoot' },
+        { key: 'P', desc: 'Pause game' },
+        { key: 'ESC', desc: 'Main menu' }
+    ];
+    const panelPadTop = 14;
+    const panelPadBot = 16;
+    const panelH = headingH + panelPadTop + panelPadBot + controlLines.length * lineH;
+
+    // Semi-transparent dark panel background
+    ctx.save();
+    ctx.fillStyle = 'rgba(10, 10, 30, 0.75)';
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)';
+    ctx.lineWidth = 2;
+    const panelX = cx - panelW / 2;
+    const panelY = panelTopY;
+    // Rounded rectangle
+    const r = 12;
+    ctx.beginPath();
+    ctx.moveTo(panelX + r, panelY);
+    ctx.lineTo(panelX + panelW - r, panelY);
+    ctx.arcTo(panelX + panelW, panelY, panelX + panelW, panelY + r, r);
+    ctx.lineTo(panelX + panelW, panelY + panelH - r);
+    ctx.arcTo(panelX + panelW, panelY + panelH, panelX + panelW - r, panelY + panelH, r);
+    ctx.lineTo(panelX + r, panelY + panelH);
+    ctx.arcTo(panelX, panelY + panelH, panelX, panelY + panelH - r, r);
+    ctx.lineTo(panelX, panelY + r);
+    ctx.arcTo(panelX, panelY, panelX + r, panelY, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // "CONTROLS" heading
+    ctx.shadowColor = '#FFD700';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 22px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('CONTROLS', cx, panelY + panelPadTop + 18);
+    ctx.shadowBlur = 0;
+
+    // Divider line under heading
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(panelX + 20, panelY + panelPadTop + 28);
+    ctx.lineTo(panelX + panelW - 20, panelY + panelPadTop + 28);
+    ctx.stroke();
+
+    // Control lines
+    const firstLineY = panelY + panelPadTop + headingH + 22;
+    for (let i = 0; i < controlLines.length; i++) {
+        const ly = firstLineY + i * lineH;
+        // Key label (gold, bold)
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 18px Courier New';
+        ctx.textAlign = 'right';
+        ctx.fillText(controlLines[i].key, cx + 10, ly);
+        // Description (white)
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '18px Courier New';
+        ctx.textAlign = 'left';
+        ctx.fillText(controlLines[i].desc, cx + 20, ly);
+    }
+    ctx.restore();
 
     // Play prompt
     const flashAlpha = 0.5 + Math.sin(time * 3) * 0.5;
     ctx.fillStyle = `rgba(0,255,255,${flashAlpha})`;
     ctx.font = 'bold 24px Courier New';
-    ctx.fillText('PRESS ENTER TO START', canvas.width / 2, canvas.height * 0.82);
+    ctx.textAlign = 'center';
+    ctx.fillText('PRESS ENTER TO START', cx, panelY + panelH + 50);
 
     // High score
     ctx.fillStyle = '#ff0';
     ctx.font = '14px Courier New';
-    ctx.fillText(`HIGH SCORE: ${highScore}`, canvas.width / 2, canvas.height * 0.9);
+    ctx.textAlign = 'center';
+    ctx.fillText(`HIGH SCORE: ${highScore}`, cx, panelY + panelH + 80);
 
     // Scoring info
     ctx.fillStyle = '#555';
     ctx.font = '12px Courier New';
-    ctx.fillText('Boss fights every 5 waves | Collect power-ups | Build combos!', canvas.width / 2, canvas.height * 0.94);
+    ctx.textAlign = 'center';
+    ctx.fillText('Boss fights every 5 waves | Collect power-ups | Build combos!', cx, panelY + panelH + 100);
 }
 
 // --- Input Handlers ---
