@@ -566,6 +566,7 @@ function update(dt) {
     showMessage(`Wave ${wave} complete! +$${waveCompleteBonus}`);
     if (wave >= totalWaves) {
       state = STATE.WIN;
+      cloudMergeAndSave('tower-defence', 'towerDefenceLeaderboard');
       pendingScore = wave;
       pendingIsWin = true;
       if (isTopTenScore(pendingScore)) {
@@ -631,6 +632,7 @@ function update(dt) {
       if (lives <= 0) {
         lives = 0;
         state = STATE.GAMEOVER;
+        cloudMergeAndSave('tower-defence', 'towerDefenceLeaderboard');
         pendingScore = wave;
         pendingIsWin = false;
         if (isTopTenScore(pendingScore)) {

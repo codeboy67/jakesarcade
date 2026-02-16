@@ -938,7 +938,7 @@ function updatePlaying(dt) {
   // Oxygen
   const o2Rate = activePowerUps.o2Boost ? 2.5 : 5;
   sub.oxygen -= o2Rate * dt;
-  if (sub.oxygen <= 0) { sub.oxygen = 0; state = 'gameOver'; return; }
+  if (sub.oxygen <= 0) { sub.oxygen = 0; state = 'gameOver'; cloudMergeAndSave('reef-rescue', 'reefRescueLeaderboard'); return; }
 
   // Invincibility timer
   if (sub.invincible > 0) sub.invincible -= dt;
@@ -1024,7 +1024,7 @@ function updatePlaying(dt) {
         sub.health--;
         sfxDamage();
         sub.invincible = 1.2;
-        if (sub.health <= 0) { state = 'gameOver'; return; }
+        if (sub.health <= 0) { state = 'gameOver'; cloudMergeAndSave('reef-rescue', 'reefRescueLeaderboard'); return; }
       }
     }
   }

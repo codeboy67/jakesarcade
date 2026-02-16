@@ -891,6 +891,8 @@ document.addEventListener('keydown', (e) => {
             const winnerScore = roundScores[nameEntryWinnerIndex];
             addToLeaderboard(finalName, winnerScore);
             gameState = 'matchEnd';
+            shakeAmount = 0;
+            cloudMergeAndSave('tank-wars', 'tankWarsLeaderboard', { dedupeByName: true });
             return;
         }
         if (e.key === 'Backspace') {
@@ -901,6 +903,7 @@ document.addEventListener('keydown', (e) => {
             // Skip name entry, save as default
             addToLeaderboard('PLAYER', roundScores[nameEntryWinnerIndex]);
             gameState = 'matchEnd';
+            shakeAmount = 0;
             return;
         }
         // Allow letters, numbers, spaces, dashes, underscores
@@ -969,6 +972,7 @@ document.addEventListener('keydown', (e) => {
                         matchEndTimer = 0;
                     } else {
                         gameState = 'matchEnd';
+                        shakeAmount = 0;
                         matchEndTimer = 0;
                     }
                 }
@@ -2371,6 +2375,7 @@ if (isTouchDevice) {
                             matchEndTimer = 0;
                         } else {
                             gameState = 'matchEnd';
+                            shakeAmount = 0;
                             matchEndTimer = 0;
                         }
                     }
@@ -2551,6 +2556,7 @@ function handleNameEntryTouch(tx, ty) {
                 const finalName = nameEntryText.trim() || 'PLAYER';
                 addToLeaderboard(finalName, roundScores[nameEntryWinnerIndex]);
                 gameState = 'matchEnd';
+                shakeAmount = 0;
                 playSound('select');
             } else if (key.action === 'BKSP') {
                 // Delete last character

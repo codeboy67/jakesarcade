@@ -327,6 +327,7 @@ nameEntryCursor=0;
 state='nameEntry';
 }else{
 state='roomComplete';
+cloudMergeAndSave('escape-room', 'escapeRoomLeaderboard', { compareFn: function(a, b) { if (b.rooms !== a.rooms) return b.rooms - a.rooms; return a.time - b.time; } }, function(merged) { leaderboard = merged; });
 }
 }
 

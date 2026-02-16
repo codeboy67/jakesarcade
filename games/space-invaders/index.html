@@ -1493,6 +1493,8 @@ function playerDie() {
     laserBeam = null;
 
     if (lives <= 0) {
+        shakeAmount = 0; shakeDuration = 0;
+        cloudMergeAndSave('space-invaders', 'spaceInvadersLeaderboard');
         if (isTopTenScore(score)) {
             state = 'nameEntry';
             nameEntryText = '';

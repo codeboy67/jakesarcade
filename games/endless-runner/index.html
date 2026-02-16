@@ -881,6 +881,7 @@ function killPlayer() {
         nameEntryCursor = 0;
     } else {
         state = STATE.GAMEOVER;
+        cloudMergeAndSave('endless-runner', 'endlessRunnerLeaderboard');
     }
     backBtn.style.display = 'block';
 }

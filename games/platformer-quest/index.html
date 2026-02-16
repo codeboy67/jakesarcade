@@ -731,6 +731,8 @@ function hurtPlayer(instant) {
                     startNameEntry(coins, 'gameOver');
                 } else {
                     gameState = 'gameOver';
+                    shakeTimer = 0; shakeIntensity = 0;
+                    cloudMergeAndSave('platformer', 'platformerLeaderboard');
                 }
             });
         }, 800);

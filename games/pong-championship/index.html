@@ -1078,6 +1078,7 @@ function update(dt) {
                     matchWinnerLabel = isVsAI ? 'AI' : 'Player 2';
                 }
                 gameState = STATE.MATCH_OVER;
+                cloudMergeAndSave('pong', 'pongLeaderboard');
                 playGameWin();
             } else {
                 currentSet++;

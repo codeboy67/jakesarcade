@@ -95,3 +95,17 @@ function mergeLeaderboards(local, cloud, options) {
 
   return unique.slice(0, limit);
 }
+
+// Convenience: fetch cloud leaderboard, merge with localStorage, save back.
+// Existing game code reads from localStorage, so after this runs the next
+// render frame automatically picks up merged data.
+function cloudMergeAndSave(cloudGameId, localStorageKey, options, onMerged) {
+  cloudLoadLeaderboard(cloudGameId, 50).then(function (cloud) {
+    if (!cloud || cloud.length === 0) return;
+    var local = [];
+    try { local = JSON.parse(localStorage.getItem(localStorageKey) || '[]'); } catch (e) {}
+    var merged = mergeLeaderboards(local, cloud, options);
+    try { localStorage.setItem(localStorageKey, JSON.stringify(merged)); } catch (e) {}
+    if (onMerged) onMerged(merged);
+  });
+}

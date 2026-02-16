@@ -1822,12 +1822,16 @@ class Game {
   }
 
   gameOver() {
+    this.screenShake = 0;
     // Clear all input state to prevent stuck keys during name entry
     for (const k in keys) keys[k] = false;
     mouse.down = false;
     mouse.rightDown = false;
 
     audio.play('gameOver');
+    cloudMergeAndSave('zombie-siege', 'zombieSiegeLeaderboard', {}, function(merged) {
+      game.leaderboardData = merged;
+    });
     if (this.score > this.highScore) {
       this.highScore = this.score;
       localStorage.setItem('zombieSiegeHighScore', this.score.toString());

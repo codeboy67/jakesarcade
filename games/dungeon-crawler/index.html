@@ -1421,6 +1421,7 @@ function updateMonsters(dt) {
             });
 
             if (player.hp <= 0) {
+                cloudMergeAndSave('dungeon-crawler', 'dungeonCrawlerLeaderboard');
                 nameEntryScore = computeScore();
                 if (isTopTenScore(nameEntryScore)) {
                     nameEntryText = 'PLAYER';
@@ -1471,6 +1472,7 @@ function updateProjectiles(dt) {
             projectiles.splice(i, 1);
 
             if (player.hp <= 0) {
+                cloudMergeAndSave('dungeon-crawler', 'dungeonCrawlerLeaderboard');
                 nameEntryScore = computeScore();
                 if (isTopTenScore(nameEntryScore)) {
                     nameEntryText = 'PLAYER';
