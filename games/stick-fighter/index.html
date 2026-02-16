@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src https://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Stick Fighter - Jake's Arcade</title>
 <style>
@@ -22,6 +22,7 @@ canvas { display: block; touch-action: none; }
 <body>
 <a id="backLink" href="../../index.html" style="display:none;">&larr; Back to Jake's Arcade</a>
 <canvas id="gc"></canvas>
+<script src="../../leaderboard.js"></script>
 <script>
 // ============================================================
 //  STICK FIGHTER — Jake's Arcade
@@ -1745,6 +1746,7 @@ function addToLeaderboard(name, score) {
     board.push({ name: name.toUpperCase() || 'PLAYER', score: score, date: Date.now() });
     board.sort((a, b) => b.score - a.score);
     saveLeaderboard(board.slice(0, 10));
+    cloudSaveScore('stick-fighter', name.toUpperCase() || 'PLAYER', score, {});
 }
 
 let player1 = new Fighter(200, 0, true, '#4488ff', 'P1');

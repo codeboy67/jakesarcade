@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src https://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Tank Wars - Jake's Arcade</title>
 <style>
@@ -39,6 +39,7 @@ canvas {
 <body>
 <a id="backLink" href="../../index.html">&larr; Back to Jake's Arcade</a>
 <canvas id="gameCanvas"></canvas>
+<script src="../../leaderboard.js"></script>
 <script>
 // ============================================================
 // TANK WARS - A complete turn-based artillery game
@@ -333,6 +334,8 @@ function addToLeaderboard(name, matchWins) {
     }
     board.sort((a, b) => b.score - a.score || a.date - b.date);
     saveLeaderboard(board.slice(0, 10));
+    var finalScore = existing ? existing.score : 1;
+    cloudSaveScore('tank-wars', normalizedName, finalScore, {});
 }
 
 const THEMES = [

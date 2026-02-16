@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src https://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Pong Championship - Jake's Arcade</title>
 <style>
@@ -40,6 +40,7 @@ canvas {
 <body>
 <a id="backLink" href="../../index.html">&larr; Back to Jake's Arcade</a>
 <canvas id="gameCanvas"></canvas>
+<script src="../../leaderboard.js"></script>
 <script>
 // ============================================================
 // PONG CHAMPIONSHIP - Jake's Arcade
@@ -693,6 +694,7 @@ function addToLeaderboard(name, score) {
     board.sort(function(a, b) { return b.score - a.score; });
     if (board.length > 10) board = board.slice(0, 10);
     saveLeaderboard(board);
+    cloudSaveScore('pong', name.toUpperCase(), score, {});
     return board;
 }
 

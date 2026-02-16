@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src https://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Dungeon Crawler - Jake's Arcade</title>
 <style>
@@ -22,6 +22,7 @@ canvas { display: block; touch-action: none; }
 <body>
 <a id="backLink" href="../../index.html">&larr; Back to Jake's Arcade</a>
 <canvas id="gameCanvas"></canvas>
+<script src="../../leaderboard.js"></script>
 <script>
 // ============================================================
 // DUNGEON CRAWLER - Jake's Arcade
@@ -396,6 +397,7 @@ function addLeaderboardEntry(name, score, floor, gold) {
     // Keep top 10
     while (board.length > 10) board.pop();
     saveLeaderboard(board);
+    cloudSaveScore('dungeon-crawler', name.substring(0, 12), score, { floor: floor, gold: gold });
     return board;
 }
 

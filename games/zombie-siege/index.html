@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src https://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>ZOMBIE SIEGE</title>
 <style>
@@ -30,6 +30,7 @@
 </head>
 <body>
 <canvas id="game"></canvas>
+<script src="../../leaderboard.js"></script>
 <script>
 // ==========================================
 //          ZOMBIE SIEGE
@@ -346,6 +347,7 @@ const Leaderboard = {
     board.sort((a, b) => b.score - a.score);
     const trimmed = board.slice(0, 10);
     this.save(trimmed);
+    cloudSaveScore('zombie-siege', name.toUpperCase(), score, { date: Date.now() });
     return trimmed;
   },
 
@@ -354,6 +356,15 @@ const Leaderboard = {
     if (rank === 2) return '#C0C0C0';
     if (rank === 3) return '#CD7F32';
     return '#ffffff';
+  },
+
+  loadAndMergeCloud(callback) {
+    const local = this.load();
+    cloudLoadLeaderboard('zombie-siege', 50).then(cloud => {
+      if (!cloud) return;
+      const merged = mergeLeaderboards(local, cloud);
+      callback(merged);
+    });
   }
 };
 

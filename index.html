@@ -294,7 +294,7 @@
     </div>
   </a>
 
-  <a href="games/dungeon-crawler/index.html" class="game-card" data-lb-key="dungeonCrawlerLeaderboard" data-lb-type="dungeon">
+  <a href="games/dungeon-crawler/index.html" class="game-card" data-lb-key="dungeonCrawlerLeaderboard" data-lb-type="dungeon" data-cloud-game="dungeon-crawler">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #312e81, #1e1b4b);">
         <span>&#x1F5E1;</span>
@@ -309,7 +309,7 @@
     </div>
   </a>
 
-  <a href="games/space-invaders/index.html" class="game-card" data-lb-key="spaceInvadersLeaderboard" data-lb-type="score">
+  <a href="games/space-invaders/index.html" class="game-card" data-lb-key="spaceInvadersLeaderboard" data-lb-type="score" data-cloud-game="space-invaders">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #0c0a1a, #1a0a2e);">
         <span>&#x1F47E;</span>
@@ -324,7 +324,7 @@
     </div>
   </a>
 
-  <a href="games/stick-fighter/index.html" class="game-card" data-lb-key="stickFighterLeaderboard" data-lb-type="wins">
+  <a href="games/stick-fighter/index.html" class="game-card" data-lb-key="stickFighterLeaderboard" data-lb-type="wins" data-cloud-game="stick-fighter">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #451a03, #78350f);">
         <span>&#x1F94A;</span>
@@ -339,7 +339,7 @@
     </div>
   </a>
 
-  <a href="games/platformer-quest/index.html" class="game-card" data-lb-key="platformerLeaderboard" data-lb-type="score">
+  <a href="games/platformer-quest/index.html" class="game-card" data-lb-key="platformerLeaderboard" data-lb-type="score" data-cloud-game="platformer">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #0e4429, #006d32);">
         <span>&#x1F3AE;</span>
@@ -354,7 +354,7 @@
     </div>
   </a>
 
-  <a href="games/escape-room/index.html" class="game-card" data-lb-key="escapeRoomLeaderboard" data-lb-type="escape">
+  <a href="games/escape-room/index.html" class="game-card" data-lb-key="escapeRoomLeaderboard" data-lb-type="escape" data-cloud-game="escape-room">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #134e4a, #064e3b);">
         <span>&#x1F510;</span>
@@ -369,7 +369,7 @@
     </div>
   </a>
 
-  <a href="games/endless-runner/index.html" class="game-card" data-lb-key="endlessRunnerLeaderboard" data-lb-type="score">
+  <a href="games/endless-runner/index.html" class="game-card" data-lb-key="endlessRunnerLeaderboard" data-lb-type="score" data-cloud-game="endless-runner">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #7c2d12, #9a3412);">
         <span>&#x1F3C3;</span>
@@ -384,7 +384,7 @@
     </div>
   </a>
 
-  <a href="games/reef-rescue/index.html" class="game-card" data-lb-key="reefRescueLeaderboard" data-lb-type="score">
+  <a href="games/reef-rescue/index.html" class="game-card" data-lb-key="reefRescueLeaderboard" data-lb-type="score" data-cloud-game="reef-rescue">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #0c2d48, #1a5276);">
         <span>&#x1F420;</span>
@@ -399,7 +399,7 @@
     </div>
   </a>
 
-  <a href="games/tank-wars/index.html" class="game-card" data-lb-key="tankWarsLeaderboard" data-lb-type="wins">
+  <a href="games/tank-wars/index.html" class="game-card" data-lb-key="tankWarsLeaderboard" data-lb-type="wins" data-cloud-game="tank-wars">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #3f3f46, #27272a);">
         <span>&#x1F3AF;</span>
@@ -420,23 +420,15 @@
   Jake's Arcade &copy; 2026
 </footer>
 
+<script src="leaderboard.js"></script>
 <script>
-document.querySelectorAll('.game-card[data-lb-key]').forEach(card => {
-  const key = card.dataset.lbKey;
-  const type = card.dataset.lbType;
-  const container = card.querySelector('.card-leaderboard');
-  if (!container) return;
-
-  let entries = [];
-  try { entries = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
+function renderCardLeaderboard(container, entries, type) {
   if (!Array.isArray(entries) || entries.length === 0) {
     container.innerHTML = '<h4>LEADERBOARD</h4><div class="lb-empty">No scores yet — be the first!</div>';
     return;
   }
-
   const top3 = entries.slice(0, 3);
   let html = '<h4>LEADERBOARD</h4>';
-
   top3.forEach((e, i) => {
     let scoreText;
     if (type === 'escape') {
@@ -456,15 +448,43 @@ document.querySelectorAll('.game-card[data-lb-key]').forEach(card => {
     } else {
       scoreText = (e.score || 0).toLocaleString();
     }
-
     html += '<div class="lb-entry">' +
       '<span class="lb-rank">' + (i + 1) + '.</span>' +
       '<span class="lb-name">' + (e.name || 'PLAYER') + '</span>' +
       '<span class="lb-score">' + scoreText + '</span>' +
       '</div>';
   });
-
   container.innerHTML = html;
+}
+
+document.querySelectorAll('.game-card[data-lb-key]').forEach(card => {
+  const key = card.dataset.lbKey;
+  const type = card.dataset.lbType;
+  const cloudGame = card.dataset.cloudGame;
+  const container = card.querySelector('.card-leaderboard');
+  if (!container) return;
+
+  // Instant render from localStorage
+  let local = [];
+  try { local = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
+  renderCardLeaderboard(container, local, type);
+
+  // Async cloud fetch + merge
+  if (cloudGame && typeof cloudLoadLeaderboard === 'function') {
+    var isEscape = (type === 'escape');
+    var isTankWars = (cloudGame === 'tank-wars');
+    cloudLoadLeaderboard(cloudGame, 50).then(function(cloud) {
+      if (!cloud) return;
+      var compareFn = isEscape
+        ? function(a, b) { if (b.rooms !== a.rooms) return b.rooms - a.rooms; return a.time - b.time; }
+        : undefined;
+      var merged = mergeLeaderboards(local, cloud, {
+        dedupeByName: isTankWars,
+        compareFn: compareFn
+      });
+      renderCardLeaderboard(container, merged, type);
+    });
+  }
 });
 </script>
 </body>
