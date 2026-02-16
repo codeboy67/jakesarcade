@@ -46,6 +46,9 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const backLink = document.getElementById('backLink');
 
+// Virtual keyboard keys must be declared before resize() since initVirtualKeyboard is hoisted
+let virtualKeyboardKeys = []; // Array of {x, y, w, h, label}
+
 // --- Resize ---
 function resize() {
     canvas.width = window.innerWidth;
@@ -53,7 +56,6 @@ function resize() {
     if (typeof initVirtualKeyboard === 'function') initVirtualKeyboard();
 }
 resize();
-window.addEventListener('resize', resize);
 
 // --- Constants ---
 const PLAYER_SPEED = 420;
@@ -80,7 +82,6 @@ let lives = 3;
 let nameEntryText = '';
 let nameEntryCursorBlink = 0;
 const MAX_NAME_LENGTH = 12;
-let virtualKeyboardKeys = []; // Array of {x, y, w, h, label}
 
 function getLeaderboard() {
     try {

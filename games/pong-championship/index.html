@@ -143,6 +143,7 @@ var touchKeyboard = {
 
 // Initialize touch keyboard dimensions and key positions based on canvas size
 function initTouchKeyboard() {
+    if (!touchKeyboard) return;
     var kb = touchKeyboard;
     var cw = canvas.width;
     var ch = canvas.height;

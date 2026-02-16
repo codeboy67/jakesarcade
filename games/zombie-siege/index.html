@@ -60,6 +60,7 @@ let joystick = {
 
 let touchFire = { active: false, touchId: null };
 let touchMelee = { active: false, touchId: null };
+let touchAim = { active: false, touchId: null };
 
 // Touch button definitions (positions set in initJoystick)
 let touchButtons = {
@@ -521,6 +522,15 @@ if (isTouchDevice) {
         continue;
       }
 
+      // Right half of screen (not on a button) -> aim
+      if (tx >= canvas.width / 2 && !touchAim.active) {
+        touchAim.active = true;
+        touchAim.touchId = t.identifier;
+        mouse.x = tx;
+        mouse.y = ty;
+        continue;
+      }
+
       // Left half of screen -> joystick
       if (tx < canvas.width / 2 && !joystick.active) {
         joystick.active = true;
@@ -540,6 +550,12 @@ if (isTouchDevice) {
     for (let i = 0; i < e.changedTouches.length; i++) {
       const t = e.changedTouches[i];
       const tx = t.clientX, ty = t.clientY;
+
+      // Update aim
+      if (touchAim.active && t.identifier === touchAim.touchId) {
+        mouse.x = tx;
+        mouse.y = ty;
+      }
 
       // Update joystick
       if (joystick.active && t.identifier === joystick.touchId) {
@@ -600,6 +616,12 @@ if (isTouchDevice) {
         touchMelee.touchId = null;
         mouse.rightDown = false;
       }
+
+      // Release aim
+      if (touchAim.active && t.identifier === touchAim.touchId) {
+        touchAim.active = false;
+        touchAim.touchId = null;
+      }
     }
   }, { passive: false });
 
@@ -614,6 +636,7 @@ if (isTouchDevice) {
     keys['a'] = false; keys['d'] = false;
     touchFire.active = false; touchFire.touchId = null;
     touchMelee.active = false; touchMelee.touchId = null;
+    touchAim.active = false; touchAim.touchId = null;
     mouse.down = false;
     mouse.rightDown = false;
   }, { passive: false });
@@ -1324,9 +1347,6 @@ class Player {
     // Clamp to screen
     this.x = clamp(this.x, this.size, canvas.width - this.size);
     this.y = clamp(this.y, this.size, canvas.height - this.size);
-
-    // Auto-aim on touch devices (updates mouse.x/y to nearest zombie)
-    if (isTouchDevice && game) autoAimAtNearest(this, game.zombies);
 
     // Aim at mouse
     this.angle = Math.atan2(mouse.y - this.y, mouse.x - this.x);
@@ -2127,7 +2147,7 @@ class Game {
     // Control entries
     const controls = isTouchDevice ? [
       { key: 'Joystick',      desc: 'Move' },
-      { key: 'Auto-Aim',      desc: 'Nearest zombie' },
+      { key: 'Drag Right',    desc: 'Aim direction' },
       { key: 'FIRE btn',      desc: 'Shoot' },
       { key: 'MELEE btn',     desc: 'Melee attack' },
       { key: '1-4 btns',      desc: 'Switch weapon' },
