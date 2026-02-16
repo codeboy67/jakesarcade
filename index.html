@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Jake's Arcade</title>
 <style>
@@ -159,6 +159,7 @@
   .tag-fighting { background: rgba(236,72,153,0.2); color: #f472b6; }
   .tag-platformer { background: rgba(6,182,212,0.2); color: #22d3ee; }
   .tag-runner { background: rgba(251,146,60,0.2); color: #fb923c; }
+  .tag-educational { background: rgba(56,189,248,0.2); color: #38bdf8; }
 
   .play-btn {
     display: inline-flex;
@@ -248,7 +249,7 @@
 
 <div class="games-grid">
 
-  <a href="games/zombie-siege/index.html" class="game-card" data-lb-key="zombieSiegeLeaderboard" data-lb-type="score">
+  <a href="games/zombie-siege/index.html" class="game-card" data-lb-key="zombieSiegeLeaderboard" data-lb-type="score" data-cloud-game="zombie-siege">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #1a1a2e, #16213e);">
         <span>&#x1F9DF;</span>
@@ -263,7 +264,7 @@
     </div>
   </a>
 
-  <a href="games/pong-championship/index.html" class="game-card" data-lb-key="pongLeaderboard" data-lb-type="wins">
+  <a href="games/pong-championship/index.html" class="game-card" data-lb-key="pongLeaderboard" data-lb-type="wins" data-cloud-game="pong">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #0f172a, #1e293b);">
         <span>&#x1F3D3;</span>
@@ -278,7 +279,7 @@
     </div>
   </a>
 
-  <a href="games/tower-defence/index.html" class="game-card" data-lb-key="towerDefenceLeaderboard" data-lb-type="score">
+  <a href="games/tower-defence/index.html" class="game-card" data-lb-key="towerDefenceLeaderboard" data-lb-type="score" data-cloud-game="tower-defence">
     <div class="card-thumb-wrapper">
       <div class="card-thumb" style="background: linear-gradient(135deg, #14532d, #064e3b);">
         <span>&#x1F3F0;</span>
@@ -378,6 +379,21 @@
       <h3>Endless Runner</h3>
       <p>Side-scrolling runner with obstacles, power-ups, and increasing speed.</p>
       <span class="card-tag tag-runner">Runner</span>
+      <div class="play-btn">&#9654; PLAY</div>
+      <div class="card-leaderboard"></div>
+    </div>
+  </a>
+
+  <a href="games/reef-rescue/index.html" class="game-card" data-lb-key="reefRescueLeaderboard" data-lb-type="score">
+    <div class="card-thumb-wrapper">
+      <div class="card-thumb" style="background: linear-gradient(135deg, #0c2d48, #1a5276);">
+        <span>&#x1F420;</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>Reef Rescue</h3>
+      <p>Pilot a research sub through ocean zones, collect specimens &amp; answer science questions!</p>
+      <span class="card-tag tag-educational">Educational</span>
       <div class="play-btn">&#9654; PLAY</div>
       <div class="card-leaderboard"></div>
     </div>

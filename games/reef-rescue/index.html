@@ -1,0 +1,1538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'self'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Reef Rescue - Jake's Arcade</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+canvas { display: block; touch-action: none; }
+#backBtn {
+  position: fixed; top: 12px; left: 12px; z-index: 100;
+  color: #aaa; text-decoration: none; font-family: Arial, sans-serif;
+  font-size: 14px; padding: 6px 12px; background: rgba(0,0,0,0.5);
+  border-radius: 4px; transition: color 0.2s;
+}
+#backBtn:hover { color: #fff; }
+</style>
+</head>
+<body>
+<a id="backBtn" href="../../index.html">&larr; Back to Jake's Arcade</a>
+<canvas id="gameCanvas"></canvas>
+<script>
+(() => {
+"use strict";
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
+resize();
+addEventListener('resize', resize);
+
+// ============ AUDIO ============
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+function playTone(freq, dur, type, vol) {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type || 'square';
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(vol || 0.12, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime + dur);
+}
+function sfxCollect() { playTone(880, 0.08, 'square', 0.1); setTimeout(() => playTone(1100, 0.1, 'square', 0.1), 60); }
+function sfxDamage() {
+  if (!audioCtx) return;
+  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.25, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+  const s = audioCtx.createBufferSource(); const g = audioCtx.createGain();
+  s.buffer = buf; g.gain.setValueAtTime(0.2, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+  s.connect(g); g.connect(audioCtx.destination); s.start();
+}
+function sfxQuizCorrect() { playTone(523, 0.1, 'square', 0.1); setTimeout(() => playTone(659, 0.1, 'square', 0.1), 100); setTimeout(() => playTone(784, 0.15, 'square', 0.1), 200); }
+function sfxQuizWrong() { playTone(200, 0.3, 'sawtooth', 0.08); }
+function sfxBubble() { playTone(600, 0.06, 'sine', 0.06); setTimeout(() => playTone(800, 0.06, 'sine', 0.05), 40); }
+function sfxZoneClear() { [523,659,784,1047].forEach((f,i) => setTimeout(() => playTone(f, 0.2, 'square', 0.1), i * 120)); }
+function sfxStart() { [440,554,659].forEach((f,i) => setTimeout(() => playTone(f, 0.15, 'square', 0.1), i * 100)); }
+function sfxSonar() { playTone(200, 0.6, 'sine', 0.15); setTimeout(() => playTone(400, 0.4, 'sine', 0.1), 200); }
+
+// ============ INPUT ============
+const keys = {};
+addEventListener('keydown', e => { keys[e.code] = true; if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault(); });
+addEventListener('keyup', e => { keys[e.code] = false; });
+
+let touchJoy = { active: false, id: -1, sx: 0, sy: 0, dx: 0, dy: 0 };
+let touchAction = false;
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.clientX < W * 0.4 && state === 'playing') {
+      touchJoy.active = true; touchJoy.id = t.identifier;
+      touchJoy.sx = t.clientX; touchJoy.sy = t.clientY; touchJoy.dx = 0; touchJoy.dy = 0;
+    } else if (t.clientX > W * 0.6 && state === 'playing') {
+      touchAction = true;
+    }
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (t.identifier === touchJoy.id && touchJoy.active) {
+      const maxR = 50;
+      let dx = t.clientX - touchJoy.sx, dy = t.clientY - touchJoy.sy;
+      const d = Math.hypot(dx, dy) || 1;
+      if (d > maxR) { dx = dx / d * maxR; dy = dy / d * maxR; }
+      touchJoy.dx = dx / maxR; touchJoy.dy = dy / maxR;
+    }
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', e => {
+  for (const t of e.changedTouches) {
+    if (t.identifier === touchJoy.id) { touchJoy.active = false; touchJoy.dx = 0; touchJoy.dy = 0; touchJoy.id = -1; }
+  }
+  touchAction = false;
+}, { passive: false });
+
+// ============ UTILS ============
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function dist(x1, y1, x2, y2) { return Math.hypot(x2 - x1, y2 - y1); }
+function seeded(s) { let x = Math.sin(s * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); }
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function lerpC(a, b, t) { return a + (b - a) * t; }
+
+// ============ QUESTIONS ============
+const QUESTIONS = [
+  // Living World 1 — Adaptations & Ecosystems (Zone 1 checkpoint)
+  { topic: 'living1', q: 'What is an adaptation?', a: ['A feature that helps an organism survive in its environment', 'A type of ocean current', 'A disease that affects coral', 'A change in water temperature'], c: 0 },
+  { topic: 'living1', q: 'Why do clownfish live among sea anemones?', a: ['They eat the anemone', 'The anemone stingers protect them from predators', 'They like the colour', 'Anemones keep the water warm'], c: 1 },
+  { topic: 'living1', q: 'What is an ecosystem?', a: ['A type of submarine', 'Only the animals in an area', 'A community of living things and their environment', 'A government programme'], c: 2 },
+  { topic: 'living1', q: 'What do coral reefs need to grow?', a: ['Cold, deep water', 'Warm, clear, shallow water with sunlight', 'Freshwater rivers', 'Complete darkness'], c: 1 },
+  { topic: 'living1', q: 'How do sea turtles breathe?', a: ['Through gills like fish', 'They absorb oxygen through their shell', 'They come to the surface to breathe air with lungs', 'They don\'t need to breathe'], c: 2 },
+  { topic: 'living1', q: 'What is camouflage?', a: ['A type of coral', 'When an animal blends in with its surroundings', 'A swimming technique', 'A way fish communicate'], c: 1 },
+  { topic: 'living1', q: 'Which of these is a producer in an ocean ecosystem?', a: ['Shark', 'Dolphin', 'Seaweed', 'Crab'], c: 2 },
+  { topic: 'living1', q: 'What is the role of decomposers in the ocean?', a: ['To hunt other fish', 'To produce sunlight', 'To break down dead organisms and recycle nutrients', 'To create coral reefs'], c: 2 },
+  { topic: 'living1', q: 'Why are coral reefs called "rainforests of the sea"?', a: ['They get a lot of rain', 'They have tall trees', 'They support a huge variety of life', 'They are green'], c: 2 },
+  { topic: 'living1', q: 'What is symbiosis?', a: ['A type of fish', 'A close relationship between two different species', 'An ocean disease', 'A kind of seaweed'], c: 1 },
+
+  // Living World 2 — Food Chains & Sustainability (Zone 2 checkpoint)
+  { topic: 'living2', q: 'In a food chain, what is a primary consumer?', a: ['A plant', 'An animal that eats plants', 'A top predator', 'A decomposer'], c: 1 },
+  { topic: 'living2', q: 'What would happen if all sharks disappeared from the ocean?', a: ['Nothing would change', 'Populations of their prey would grow too large', 'Coral would grow faster', 'The water would get warmer'], c: 1 },
+  { topic: 'living2', q: 'What is a food web?', a: ['A spider\'s underwater trap', 'A single food chain', 'Many interconnected food chains in an ecosystem', 'A type of fishing net'], c: 2 },
+  { topic: 'living2', q: 'How does overfishing affect ocean ecosystems?', a: ['It has no effect', 'It removes too many fish and disrupts food chains', 'It makes fish stronger', 'It helps coral grow'], c: 1 },
+  { topic: 'living2', q: 'What is photosynthesis?', a: ['How fish breathe', 'The process plants use to make food from sunlight', 'A type of pollution', 'How waves are formed'], c: 1 },
+  { topic: 'living2', q: 'Why are mangrove forests important for the ocean?', a: ['They produce oil', 'They cause tsunamis', 'They protect coastlines and provide nurseries for young fish', 'They block sunlight'], c: 2 },
+  { topic: 'living2', q: 'What is the main source of energy for ocean food chains?', a: ['The Moon', 'Volcanic vents', 'The Sun', 'Ocean currents'], c: 2 },
+  { topic: 'living2', q: 'What does "endangered" mean for a species?', a: ['Very common', 'Lives in deep water', 'At risk of becoming extinct', 'Recently discovered'], c: 2 },
+  { topic: 'living2', q: 'How do marine protected areas help the ocean?', a: ['They heat the water', 'They add more fish', 'They limit human activities to let ecosystems recover', 'They remove all predators'], c: 2 },
+  { topic: 'living2', q: 'What is biodiversity?', a: ['A type of seaweed', 'The depth of the ocean', 'The variety of different living things in an area', 'The temperature of water'], c: 2 },
+
+  // Physical World — Forces & Buoyancy (Zone 3 checkpoint)
+  { topic: 'physical', q: 'Why do some objects float in water?', a: ['They are magnetic', 'Buoyancy — the water pushes up on them', 'The wind holds them up', 'They are afraid of sinking'], c: 1 },
+  { topic: 'physical', q: 'What force pulls objects toward Earth?', a: ['Magnetism', 'Friction', 'Gravity', 'Buoyancy'], c: 2 },
+  { topic: 'physical', q: 'Why does water pressure increase with depth?', a: ['Fish push on the water', 'The weight of water above pushes down', 'The ocean floor pulls water down', 'It doesn\'t change'], c: 1 },
+  { topic: 'physical', q: 'Why do submarines fill tanks with water to dive?', a: ['To clean the tanks', 'To make drinking water', 'The extra weight makes them less buoyant', 'To cool the engine'], c: 2 },
+  { topic: 'physical', q: 'What happens to a balloon taken deep underwater?', a: ['It explodes', 'It gets smaller as pressure increases', 'It glows', 'Nothing changes'], c: 1 },
+  { topic: 'physical', q: 'What is friction in water often called?', a: ['Splash', 'Current', 'Drag', 'Tide'], c: 2 },
+  { topic: 'physical', q: 'Why are submarines and fish streamlined?', a: ['To look nice', 'To reduce drag and move through water more easily', 'To reflect light', 'To stay warm'], c: 1 },
+  { topic: 'physical', q: 'What helps create ocean currents?', a: ['Only the Moon', 'Wind, temperature differences, and Earth\'s rotation', 'Fish swimming together', 'Submarine propellers'], c: 1 },
+  { topic: 'physical', q: 'How does a life jacket help you float?', a: ['It is very heavy', 'It is magnetic', 'It is filled with material less dense than water', 'It pushes water away'], c: 2 },
+  { topic: 'physical', q: 'What is the upward force that water exerts on objects?', a: ['Gravity', 'Magnetism', 'Buoyancy', 'Friction'], c: 2 },
+
+  // Earth & Space — Ocean Floor & Geology (Zone 4 checkpoint)
+  { topic: 'earth', q: 'What is the deepest part of the ocean called?', a: ['The Great Barrier Reef', 'The Mariana Trench', 'The Atlantic Ridge', 'The Bermuda Triangle'], c: 1 },
+  { topic: 'earth', q: 'What are underwater mountains called?', a: ['Dunes', 'Valleys', 'Seamounts', 'Icebergs'], c: 2 },
+  { topic: 'earth', q: 'What causes earthquakes on the ocean floor?', a: ['Strong currents', 'Large fish', 'Movement of tectonic plates', 'Submarine engines'], c: 2 },
+  { topic: 'earth', q: 'What is a mid-ocean ridge?', a: ['A coral reef', 'An underwater mountain chain where new crust forms', 'A deep trench', 'A type of current'], c: 1 },
+  { topic: 'earth', q: 'What type of rock forms when lava cools underwater?', a: ['Sandstone', 'Limestone', 'Igneous rock', 'Chalk'], c: 2 },
+  { topic: 'earth', q: 'What are the three main types of rock?', a: ['Big, medium, small', 'Igneous, sedimentary, metamorphic', 'Hard, soft, sandy', 'Ocean, river, mountain'], c: 1 },
+  { topic: 'earth', q: 'How do fossils form on the ocean floor?', a: ['Fish carve them', 'Dead organisms sink and are buried in sediment over time', 'Divers place them there', 'Waves push them down'], c: 1 },
+  { topic: 'earth', q: 'What is the continental shelf?', a: ['A bookshelf under water', 'The shallow, gently sloping area around continents', 'The deepest part of the ocean', 'A type of island'], c: 1 },
+  { topic: 'earth', q: 'About what percentage of Earth\'s surface is covered by ocean?', a: ['About 30%', 'About 50%', 'About 71%', 'About 90%'], c: 2 },
+  { topic: 'earth', q: 'What do scientists use to map the ocean floor?', a: ['Telescopes', 'Sonar', 'Magnifying glasses', 'Satellites only'], c: 1 },
+
+  // Material World — Heat & States of Matter (Zone 5 checkpoint)
+  { topic: 'material', q: 'What are the three common states of matter?', a: ['Hot, warm, cold', 'Solid, liquid, gas', 'Big, medium, small', 'Hard, soft, squishy'], c: 1 },
+  { topic: 'material', q: 'How do volcanic vents heat the surrounding water?', a: ['They use electricity', 'Heat energy transfers from the hot rock to the water', 'They reflect sunlight', 'Bacteria generate heat'], c: 1 },
+  { topic: 'material', q: 'What is evaporation?', a: ['Water freezing', 'A liquid turning into a gas', 'Rain falling', 'A solid melting'], c: 1 },
+  { topic: 'material', q: 'Why does hot water rise in the ocean?', a: ['Fish push it up', 'Hot water is less dense than cold water', 'The Sun pulls it up', 'It doesn\'t rise'], c: 1 },
+  { topic: 'material', q: 'What is a reversible change?', a: ['A change that cannot be undone', 'A change that can be undone, like melting ice', 'Burning wood', 'Cooking an egg'], c: 1 },
+  { topic: 'material', q: 'What is an irreversible change?', a: ['Melting chocolate', 'Freezing water', 'A change that cannot be undone, like cooking an egg', 'Dissolving sugar'], c: 2 },
+  { topic: 'material', q: 'What is thermal energy?', a: ['Energy from magnets', 'Energy from the movement of particles in a substance', 'Energy from light only', 'Energy stored in food'], c: 1 },
+  { topic: 'material', q: 'What happens to particles when they are heated?', a: ['They stop moving', 'They get heavier', 'They move faster and spread further apart', 'They shrink'], c: 2 },
+  { topic: 'material', q: 'What is conduction?', a: ['Heat transfer through direct contact between materials', 'Sound travelling through water', 'Light reflecting off surfaces', 'Electricity in wires'], c: 0 },
+  { topic: 'material', q: 'At what temperature does pure water boil?', a: ['50°C', '75°C', '100°C', '200°C'], c: 2 },
+
+  // Mixed Review (before Zone 6)
+  { topic: 'mixed', q: 'Which ocean zone gets the most sunlight?', a: ['The midnight zone', 'The twilight zone', 'The sunlight zone (top 200m)', 'The abyss'], c: 2 },
+  { topic: 'mixed', q: 'What gas do fish extract from water using their gills?', a: ['Carbon dioxide', 'Nitrogen', 'Hydrogen', 'Oxygen'], c: 3 },
+  { topic: 'mixed', q: 'Why is the deep ocean completely dark?', a: ['Fish block the light', 'Sunlight cannot penetrate that far', 'The water is too dirty', 'It isn\'t dark'], c: 1 },
+  { topic: 'mixed', q: 'What is bioluminescence?', a: ['An ocean current', 'When living things produce their own light', 'A type of coral', 'Reflected sunlight'], c: 1 },
+  { topic: 'mixed', q: 'How do scientists explore the deep ocean?', a: ['By swimming', 'Using submersibles and remotely operated vehicles', 'They can\'t explore it', 'With aeroplanes'], c: 1 },
+  { topic: 'mixed', q: 'What is salinity?', a: ['Ocean temperature', 'The amount of salt dissolved in water', 'Water pressure', 'Wave height'], c: 1 },
+  { topic: 'mixed', q: 'Why do some deep-sea fish have very large eyes?', a: ['To scare predators', 'To collect as much light as possible in the darkness', 'To see colours better', 'They are born that way randomly'], c: 1 },
+  { topic: 'mixed', q: 'What is the water cycle?', a: ['Water going in circles', 'The continuous movement of water between ocean, atmosphere, and land', 'Waves crashing on shore', 'Fish migration patterns'], c: 1 },
+  { topic: 'mixed', q: 'Which force causes ocean tides?', a: ['Wind', 'Magnetism', 'Gravity from the Moon and Sun', 'Earth\'s spin alone'], c: 2 },
+  { topic: 'mixed', q: 'What is erosion?', a: ['New rock forming', 'The wearing away of rock and soil by water, wind, or ice', 'Plants growing on rocks', 'Volcanic eruptions'], c: 1 },
+];
+
+// ============ ZONE DEFINITIONS ============
+const ZONES = [
+  {
+    name: 'Coral Reef', bgTop: '#0077b6', bgBottom: '#023e8a', terrainCol: '#c1440e',
+    terrainCol2: '#ff6b6b', scrollSpeed: 90, length: 5500,
+    specimens: [
+      { name: 'Clownfish', color: '#ff6b35', pts: 100, shape: 'fish' },
+      { name: 'Coral Sample', color: '#ff69b4', pts: 150, shape: 'coral' },
+    ],
+    hazards: [
+      { name: 'Jellyfish', color: '#da70d6', shape: 'jelly', speed: 30, pattern: 'sine' },
+      { name: 'Sea Urchin', color: '#4a0e4e', shape: 'urchin', speed: 0, pattern: 'static' },
+    ],
+    rescues: [{ name: 'Trapped Clownfish', color: '#ff6b35', pts: 300, shape: 'fish' }],
+    quizTopic: 'living1', lightRays: true, bioGlow: false,
+    decoType: 'coral', decoColors: ['#ff6b6b','#ff69b4','#ffa07a','#dda0dd'],
+  },
+  {
+    name: 'Kelp Forest', bgTop: '#1b5e20', bgBottom: '#0d3b12', terrainCol: '#2e7d32',
+    terrainCol2: '#1b5e20', scrollSpeed: 100, length: 6000,
+    specimens: [
+      { name: 'Sea Turtle', color: '#4caf50', pts: 150, shape: 'turtle' },
+      { name: 'Kelp Sample', color: '#66bb6a', pts: 100, shape: 'kelp' },
+    ],
+    hazards: [
+      { name: 'Kelp Tangle', color: '#2e7d32', shape: 'tangle', speed: 0, pattern: 'static' },
+      { name: 'Current', color: '#80cbc4', shape: 'current', speed: 40, pattern: 'drift' },
+    ],
+    rescues: [{ name: 'Tangled Turtle', color: '#4caf50', pts: 300, shape: 'turtle' }],
+    quizTopic: 'living2', lightRays: true, bioGlow: false,
+    decoType: 'kelp', decoColors: ['#2e7d32','#388e3c','#43a047','#1b5e20'],
+  },
+  {
+    name: 'Open Ocean', bgTop: '#1565c0', bgBottom: '#0d47a1', terrainCol: '#0d47a1',
+    terrainCol2: '#1565c0', scrollSpeed: 115, length: 6500,
+    specimens: [
+      { name: 'Dolphin', color: '#90a4ae', pts: 200, shape: 'dolphin' },
+      { name: 'Plankton', color: '#aed581', pts: 80, shape: 'plankton' },
+    ],
+    hazards: [
+      { name: 'Shark', color: '#546e7a', shape: 'shark', speed: 60, pattern: 'chase' },
+      { name: 'Fast Current', color: '#42a5f5', shape: 'current', speed: 80, pattern: 'drift' },
+    ],
+    rescues: [{ name: 'Netted Dolphin', color: '#90a4ae', pts: 350, shape: 'dolphin' }],
+    quizTopic: 'physical', lightRays: false, bioGlow: false,
+    decoType: 'none', decoColors: [],
+  },
+  {
+    name: 'Deep Sea', bgTop: '#1a237e', bgBottom: '#0a0a2e', terrainCol: '#263238',
+    terrainCol2: '#37474f', scrollSpeed: 100, length: 7000,
+    specimens: [
+      { name: 'Bioluminescent Jelly', color: '#7c4dff', pts: 200, shape: 'biojelly' },
+      { name: 'Lanternfish', color: '#00e5ff', pts: 150, shape: 'fish' },
+    ],
+    hazards: [
+      { name: 'Anglerfish', color: '#d32f2f', shape: 'angler', speed: 45, pattern: 'chase' },
+      { name: 'Dark Zone', color: '#000', shape: 'dark', speed: 0, pattern: 'static' },
+    ],
+    rescues: [{ name: 'Trapped Lanternfish', color: '#00e5ff', pts: 350, shape: 'fish' }],
+    quizTopic: 'earth', lightRays: false, bioGlow: true,
+    decoType: 'rocks', decoColors: ['#37474f','#455a64','#263238'],
+  },
+  {
+    name: 'Volcanic Vents', bgTop: '#1a0a0a', bgBottom: '#330a0a', terrainCol: '#4e342e',
+    terrainCol2: '#6d4c41', scrollSpeed: 110, length: 7500,
+    specimens: [
+      { name: 'Extremophile', color: '#ff5722', pts: 250, shape: 'bacteria' },
+      { name: 'Tube Worm', color: '#e64a19', pts: 200, shape: 'worm' },
+    ],
+    hazards: [
+      { name: 'Heat Plume', color: '#ff6f00', shape: 'plume', speed: 20, pattern: 'sine' },
+      { name: 'Falling Rock', color: '#5d4037', shape: 'rock', speed: 50, pattern: 'fall' },
+    ],
+    rescues: [{ name: 'Trapped Crab', color: '#ff8a65', pts: 350, shape: 'crab' }],
+    quizTopic: 'material', lightRays: false, bioGlow: true,
+    decoType: 'vents', decoColors: ['#ff6f00','#ff8f00','#bf360c'],
+  },
+  {
+    name: 'The Trench', bgTop: '#050510', bgBottom: '#000005', terrainCol: '#1a1a2e',
+    terrainCol2: '#16213e', scrollSpeed: 120, length: 9000,
+    specimens: [
+      { name: 'Ancient Fossil', color: '#ffd54f', pts: 300, shape: 'fossil' },
+      { name: 'Rare Specimen', color: '#ce93d8', pts: 400, shape: 'rare' },
+    ],
+    hazards: [
+      { name: 'Pressure Zone', color: '#311b92', shape: 'pressure', speed: 0, pattern: 'static' },
+      { name: 'Trench Shark', color: '#37474f', shape: 'shark', speed: 70, pattern: 'chase' },
+      { name: 'Falling Rock', color: '#3e2723', shape: 'rock', speed: 60, pattern: 'fall' },
+    ],
+    rescues: [{ name: 'Ancient Creature', color: '#ffd54f', pts: 500, shape: 'fossil' }],
+    quizTopic: 'mixed', lightRays: false, bioGlow: true,
+    decoType: 'trench', decoColors: ['#1a1a2e','#0d0d1a','#16213e'],
+  },
+];
+
+const POWER_UP_TYPES = [
+  { id: 'shield', name: 'Shield', desc: 'Absorbs 1 hit', icon: '🛡️' },
+  { id: 'o2Boost', name: 'O₂ Boost', desc: 'Full oxygen, slower drain', icon: '💨' },
+  { id: 'sonar', name: 'Sonar Pulse', desc: 'Reveals hidden specimens', icon: '📡' },
+  { id: 'magnet', name: 'Specimen Magnet', desc: 'Attracts specimens 10s', icon: '🧲' },
+  { id: 'speed', name: 'Speed Boost', desc: 'Faster movement', icon: '⚡' },
+];
+
+// ============ GAME STATE ============
+let state = 'menu';
+let score = 0;
+let totalSpecimens = 0;
+let totalRescues = 0;
+let currentZone = 0;
+let camera = { x: 0 };
+let sub = { x: 0, y: 0, health: 3, maxHealth: 3, oxygen: 100, maxOxygen: 100, invincible: 0 };
+let specimens = [];
+let hazards = [];
+let o2Bubbles = [];
+let particles = [];
+let activePowerUps = {};
+let powerUpTimers = {};
+let sonarAvailable = false;
+let sonarActive = false;
+let sonarTimer = 0;
+let propAngle = 0;
+let gameTime = 0;
+let menuTime = 0;
+let zoneCompleteTimer = 0;
+let shakeTimer = 0;
+let shakeIntensity = 0;
+
+// Quiz state
+let quiz = { questions: [], qi: 0, answered: false, sel: -1, correct: 0, earned: [], showSummary: false, timer: 0 };
+
+// Name entry
+let nameChars = [];
+let nameCursor = 0;
+const KEYS_ROW1 = 'QWERTYUIOP'.split('');
+const KEYS_ROW2 = 'ASDFGHJKL'.split('');
+const KEYS_ROW3 = 'ZXCVBNM'.split('');
+const KB_ROWS = [KEYS_ROW1, KEYS_ROW2, KEYS_ROW3];
+
+// Leaderboard
+const LB_KEY = 'reefRescueLeaderboard';
+function getLB() { try { return JSON.parse(localStorage.getItem(LB_KEY) || '[]'); } catch(e) { return []; } }
+function saveLB(name, sc) {
+  const lb = getLB(); lb.push({ name, score: sc });
+  lb.sort((a, b) => b.score - a.score);
+  localStorage.setItem(LB_KEY, JSON.stringify(lb.slice(0, 10)));
+}
+
+// ============ INIT ZONE ============
+function initZone(zi) {
+  currentZone = zi;
+  const z = ZONES[zi];
+  camera.x = 0;
+  sub.x = W * 0.2; sub.y = H * 0.5;
+  sub.health = 3; sub.maxHealth = 3;
+  sub.invincible = 0;
+  if (activePowerUps.o2Boost) { sub.oxygen = 100; sub.maxOxygen = 100; }
+  else { sub.oxygen = 100; }
+  specimens = []; hazards = []; o2Bubbles = []; particles = [];
+  sonarActive = false; sonarTimer = 0;
+
+  // Power-up timers
+  if (activePowerUps.magnet) powerUpTimers.magnet = 10;
+  if (activePowerUps.speed) powerUpTimers.speed = 999;
+
+  // Generate specimens
+  for (let wx = 350; wx < z.length - 200; wx += 280 + Math.random() * 220) {
+    const t = z.specimens[Math.floor(Math.random() * z.specimens.length)];
+    const hidden = Math.random() < 0.2;
+    specimens.push({ worldX: wx, y: 70 + Math.random() * (H - 140), type: t, collected: false, isRescue: false, hidden, bob: Math.random() * 6.28 });
+  }
+  // Rescue creatures
+  for (let wx = 700; wx < z.length - 300; wx += 900 + Math.random() * 500) {
+    const t = z.rescues[Math.floor(Math.random() * z.rescues.length)];
+    specimens.push({ worldX: wx, y: 80 + Math.random() * (H - 160), type: t, collected: false, isRescue: true, hidden: false, bob: Math.random() * 6.28 });
+  }
+  // Hazards
+  const hazardGap = Math.max(180, 300 - zi * 20);
+  for (let wx = 500; wx < z.length - 100; wx += hazardGap + Math.random() * 200) {
+    const t = z.hazards[Math.floor(Math.random() * z.hazards.length)];
+    const yy = 60 + Math.random() * (H - 120);
+    hazards.push({ worldX: wx, y: yy, baseY: yy, type: t, time: Math.random() * 6.28, hit: false });
+  }
+  // O2 bubbles
+  for (let wx = 250; wx < z.length; wx += 350 + Math.random() * 250) {
+    o2Bubbles.push({ worldX: wx, y: 50 + Math.random() * (H - 100), collected: false, bob: Math.random() * 6.28 });
+  }
+}
+
+// ============ DRAWING HELPERS ============
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawSub(x, y, t) {
+  ctx.save();
+  ctx.translate(x, y);
+  // Glow
+  ctx.shadowColor = '#ffd54f';
+  ctx.shadowBlur = 15;
+  // Body
+  ctx.fillStyle = '#f5c542';
+  roundRect(-28, -14, 56, 28, 12); ctx.fill();
+  ctx.shadowBlur = 0;
+  // Stripe
+  ctx.fillStyle = '#e6a817';
+  ctx.fillRect(-10, -14, 36, 5);
+  // Window
+  ctx.fillStyle = '#4fc3f7';
+  ctx.beginPath(); ctx.arc(8, 0, 7, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#37474f'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(8, 0, 7, 0, Math.PI * 2); ctx.stroke();
+  // Propeller
+  ctx.fillStyle = '#78909c';
+  const pa = propAngle;
+  for (let i = 0; i < 3; i++) {
+    ctx.save();
+    ctx.translate(-28, 0);
+    ctx.rotate(pa + i * 2.094);
+    ctx.fillRect(-2, -10, 4, 20);
+    ctx.restore();
+  }
+  // Top fin
+  ctx.fillStyle = '#e6a817';
+  ctx.beginPath(); ctx.moveTo(-5, -14); ctx.lineTo(0, -22); ctx.lineTo(5, -14); ctx.closePath(); ctx.fill();
+  // Bottom fin
+  ctx.beginPath(); ctx.moveTo(-5, 14); ctx.lineTo(0, 20); ctx.lineTo(5, 14); ctx.closePath(); ctx.fill();
+  // Shield effect
+  if (activePowerUps.shield) {
+    ctx.strokeStyle = `rgba(100,200,255,${0.4 + Math.sin(t * 4) * 0.2})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, 32, 0, Math.PI * 2); ctx.stroke();
+  }
+  // Speed lines
+  if (activePowerUps.speed) {
+    ctx.strokeStyle = 'rgba(255,235,59,0.4)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      const ly = -8 + i * 8;
+      ctx.beginPath(); ctx.moveTo(-35 - Math.random() * 15, ly); ctx.lineTo(-42 - Math.random() * 20, ly); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function drawFish(x, y, sz, col) {
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.ellipse(x, y, sz * 0.6, sz * 0.35, 0, 0, Math.PI * 2); ctx.fill();
+  // Tail
+  ctx.beginPath(); ctx.moveTo(x - sz * 0.5, y); ctx.lineTo(x - sz * 0.8, y - sz * 0.3); ctx.lineTo(x - sz * 0.8, y + sz * 0.3); ctx.closePath(); ctx.fill();
+  // Eye
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + sz * 0.2, y - sz * 0.08, sz * 0.1, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(x + sz * 0.22, y - sz * 0.08, sz * 0.05, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawTurtle(x, y, sz, col) {
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.ellipse(x, y, sz * 0.6, sz * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#2e7d32';
+  ctx.beginPath(); ctx.ellipse(x, y, sz * 0.5, sz * 0.32, 0, 0, Math.PI * 2); ctx.fill();
+  // Head
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.arc(x + sz * 0.55, y, sz * 0.15, 0, Math.PI * 2); ctx.fill();
+  // Flippers
+  ctx.fillStyle = col;
+  for (const dy of [-1, 1]) {
+    ctx.beginPath(); ctx.ellipse(x + sz * 0.1, y + dy * sz * 0.35, sz * 0.3, sz * 0.08, dy * 0.3, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawJelly(x, y, sz, col, t) {
+  ctx.fillStyle = col;
+  ctx.globalAlpha = 0.7;
+  ctx.beginPath(); ctx.arc(x, y, sz * 0.4, Math.PI, 0); ctx.fill();
+  // Tentacles
+  ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath(); ctx.moveTo(x + i * sz * 0.12, y);
+    ctx.quadraticCurveTo(x + i * sz * 0.12 + Math.sin(t * 3 + i) * 8, y + sz * 0.4, x + i * sz * 0.15, y + sz * 0.6);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawShark(x, y, sz, col) {
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.moveTo(x + sz * 0.6, y);
+  ctx.lineTo(x - sz * 0.5, y - sz * 0.2);
+  ctx.lineTo(x - sz * 0.6, y);
+  ctx.lineTo(x - sz * 0.5, y + sz * 0.2);
+  ctx.closePath(); ctx.fill();
+  // Dorsal fin
+  ctx.beginPath(); ctx.moveTo(x, y - sz * 0.2); ctx.lineTo(x - sz * 0.1, y - sz * 0.45); ctx.lineTo(x - sz * 0.2, y - sz * 0.2); ctx.closePath(); ctx.fill();
+  // Eye
+  ctx.fillStyle = '#f44336'; ctx.beginPath(); ctx.arc(x + sz * 0.3, y - sz * 0.05, 3, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawUrchin(x, y, sz, col) {
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.arc(x, y, sz * 0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 2;
+  for (let a = 0; a < Math.PI * 2; a += 0.5) {
+    ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * sz * 0.3, y + Math.sin(a) * sz * 0.3);
+    ctx.lineTo(x + Math.cos(a) * sz * 0.6, y + Math.sin(a) * sz * 0.6); ctx.stroke();
+  }
+}
+
+function drawAngler(x, y, sz, col, t) {
+  ctx.fillStyle = '#1a1a2e';
+  ctx.beginPath(); ctx.ellipse(x, y, sz * 0.5, sz * 0.4, 0, 0, Math.PI * 2); ctx.fill();
+  // Mouth
+  ctx.fillStyle = '#c62828';
+  ctx.beginPath(); ctx.arc(x + sz * 0.35, y + sz * 0.1, sz * 0.15, 0, Math.PI * 2); ctx.fill();
+  // Teeth
+  ctx.fillStyle = '#fff';
+  for (let i = 0; i < 4; i++) { ctx.fillRect(x + sz * 0.25 + i * 5, y + sz * 0.05, 2, 5); }
+  // Lure
+  ctx.strokeStyle = '#666'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x, y - sz * 0.4);
+  ctx.quadraticCurveTo(x + sz * 0.3, y - sz * 0.7, x + sz * 0.2, y - sz * 0.6); ctx.stroke();
+  ctx.fillStyle = `rgba(255,235,59,${0.6 + Math.sin(t * 5) * 0.4})`;
+  ctx.beginPath(); ctx.arc(x + sz * 0.2, y - sz * 0.6, 4, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawBacteria(x, y, sz, col) {
+  ctx.fillStyle = col;
+  for (let i = 0; i < 5; i++) {
+    const a = i * 1.256; const r = sz * 0.15;
+    ctx.beginPath(); ctx.arc(x + Math.cos(a) * r, y + Math.sin(a) * r, sz * 0.12, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawWorm(x, y, sz, col) {
+  ctx.strokeStyle = col; ctx.lineWidth = sz * 0.15; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x, y + sz * 0.4);
+  ctx.quadraticCurveTo(x + sz * 0.15, y, x - sz * 0.1, y - sz * 0.3);
+  ctx.stroke();
+  ctx.fillStyle = '#ff8a65';
+  ctx.beginPath(); ctx.arc(x - sz * 0.1, y - sz * 0.35, sz * 0.12, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawFossil(x, y, sz, col) {
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  for (let a = 0; a < Math.PI * 2; a += 0.6) {
+    const r = sz * 0.3 + Math.sin(a * 3) * sz * 0.1;
+    const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r;
+    a === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#8d6e63'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(x, y, sz * 0.15, 0, Math.PI * 2); ctx.stroke();
+}
+
+function drawNet(x, y, sz) {
+  ctx.strokeStyle = 'rgba(200,200,200,0.6)'; ctx.lineWidth = 1;
+  const s = sz * 0.7;
+  for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(x - s, y + i * s * 0.25); ctx.lineTo(x + s, y + i * s * 0.25); ctx.stroke(); }
+  for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(x + i * s * 0.25, y - s); ctx.lineTo(x + i * s * 0.25, y + s); ctx.stroke(); }
+}
+
+function drawSpecimenShape(type, x, y, sz, t) {
+  const col = type.color;
+  switch (type.shape) {
+    case 'fish': drawFish(x, y, sz, col); break;
+    case 'coral': ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x, y - sz * 0.4);
+      ctx.lineTo(x + sz * 0.3, y + sz * 0.3); ctx.lineTo(x - sz * 0.3, y + sz * 0.3); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x + sz * 0.15, y - sz * 0.2); ctx.lineTo(x + sz * 0.4, y + sz * 0.2); ctx.lineTo(x + sz * 0.05, y + sz * 0.2); ctx.closePath(); ctx.fill(); break;
+    case 'turtle': drawTurtle(x, y, sz, col); break;
+    case 'kelp': ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.beginPath();
+      ctx.moveTo(x, y + sz * 0.4); ctx.quadraticCurveTo(x + Math.sin(t * 2) * 8, y, x, y - sz * 0.4); ctx.stroke(); break;
+    case 'dolphin': ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, sz * 0.6, sz * 0.25, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x - sz * 0.5, y); ctx.lineTo(x - sz * 0.75, y - sz * 0.25); ctx.lineTo(x - sz * 0.7, y + sz * 0.1); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x + sz * 0.5, y); ctx.lineTo(x + sz * 0.7, y - sz * 0.08); ctx.stroke(); break;
+    case 'plankton': ctx.fillStyle = col;
+      for (let i = 0; i < 6; i++) { const a = i * 1.047; ctx.beginPath(); ctx.arc(x + Math.cos(a) * sz * 0.15, y + Math.sin(a) * sz * 0.15, 2, 0, Math.PI * 2); ctx.fill(); } break;
+    case 'biojelly': drawJelly(x, y, sz, col, t); break;
+    case 'bacteria': drawBacteria(x, y, sz, col); break;
+    case 'worm': drawWorm(x, y, sz, col); break;
+    case 'fossil': drawFossil(x, y, sz, col); break;
+    case 'rare': ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 10;
+      ctx.beginPath(); for (let i = 0; i < 5; i++) { const a = i * 1.256 - Math.PI / 2;
+        ctx.lineTo(x + Math.cos(a) * sz * 0.35, y + Math.sin(a) * sz * 0.35);
+        const a2 = a + 0.628; ctx.lineTo(x + Math.cos(a2) * sz * 0.15, y + Math.sin(a2) * sz * 0.15);
+      } ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0; break;
+    case 'crab': ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, sz * 0.3, sz * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      for (const dx of [-1, 1]) { ctx.beginPath(); ctx.moveTo(x + dx * sz * 0.3, y); ctx.lineTo(x + dx * sz * 0.55, y - sz * 0.15);
+        ctx.lineTo(x + dx * sz * 0.5, y - sz * 0.25); ctx.stroke(); } break;
+    default: ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, sz * 0.3, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawHazardShape(hz, x, y, sz, t) {
+  const type = hz.type;
+  switch (type.shape) {
+    case 'jelly': drawJelly(x, y, sz, type.color, t); break;
+    case 'urchin': drawUrchin(x, y, sz, type.color); break;
+    case 'shark': drawShark(x, y, sz, type.color); break;
+    case 'angler': drawAngler(x, y, sz, type.color, t); break;
+    case 'tangle': ctx.strokeStyle = type.color; ctx.lineWidth = 3; ctx.globalAlpha = 0.7;
+      for (let i = 0; i < 4; i++) { ctx.beginPath();
+        ctx.moveTo(x - sz * 0.4, y + (i - 1.5) * sz * 0.2);
+        ctx.bezierCurveTo(x - sz * 0.1, y + (i - 1) * sz * 0.3, x + sz * 0.1, y + (i - 2) * sz * 0.2, x + sz * 0.4, y + (i - 1.5) * sz * 0.15);
+        ctx.stroke(); } ctx.globalAlpha = 1; break;
+    case 'current': ctx.strokeStyle = type.color; ctx.lineWidth = 2; ctx.globalAlpha = 0.5;
+      for (let i = 0; i < 3; i++) { const ox = Math.sin(t * 2 + i) * 10;
+        ctx.beginPath(); ctx.moveTo(x - sz * 0.4 + ox, y + (i - 1) * 12);
+        ctx.lineTo(x + sz * 0.2 + ox, y + (i - 1) * 12);
+        ctx.lineTo(x + sz * 0.1 + ox, y + (i - 1) * 12 - 5); ctx.stroke();
+      } ctx.globalAlpha = 1; break;
+    case 'plume': ctx.globalAlpha = 0.5;
+      for (let i = 0; i < 5; i++) { const py = y - i * sz * 0.15 + Math.sin(t * 3 + i) * 5;
+        const r = sz * 0.15 + (i * 0.02 * sz); ctx.fillStyle = `rgba(255,${100 + i * 30},0,${0.5 - i * 0.08})`;
+        ctx.beginPath(); ctx.arc(x + Math.sin(t * 2 + i * 0.7) * 8, py, r, 0, Math.PI * 2); ctx.fill();
+      } ctx.globalAlpha = 1; break;
+    case 'rock': ctx.fillStyle = type.color;
+      ctx.beginPath(); ctx.moveTo(x, y - sz * 0.35);
+      ctx.lineTo(x + sz * 0.3, y - sz * 0.1); ctx.lineTo(x + sz * 0.25, y + sz * 0.3);
+      ctx.lineTo(x - sz * 0.25, y + sz * 0.3); ctx.lineTo(x - sz * 0.3, y); ctx.closePath(); ctx.fill(); break;
+    case 'dark': ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.beginPath(); ctx.arc(x, y, sz * 0.6, 0, Math.PI * 2); ctx.fill(); break;
+    case 'pressure': const grd = ctx.createRadialGradient(x, y, 0, x, y, sz * 0.7);
+      grd.addColorStop(0, 'rgba(49,27,146,0.5)'); grd.addColorStop(1, 'rgba(49,27,146,0)');
+      ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(x, y, sz * 0.7, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(100,80,200,0.3)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x, y, sz * 0.5 + Math.sin(t * 4) * 5, 0, Math.PI * 2); ctx.stroke(); break;
+    default: ctx.fillStyle = type.color; ctx.beginPath(); ctx.arc(x, y, sz * 0.3, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// ============ BACKGROUND ============
+function drawBackground(zi, camX) {
+  const z = ZONES[zi];
+  // Gradient
+  const grd = ctx.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, z.bgTop); grd.addColorStop(1, z.bgBottom);
+  ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
+
+  // Light rays (shallow zones)
+  if (z.lightRays) {
+    ctx.globalAlpha = 0.06;
+    for (let i = 0; i < 5; i++) {
+      const rx = ((i * 300 + 150) - camX * 0.05) % (W + 200) - 100;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(rx, 0); ctx.lineTo(rx + 40 + i * 10, 0);
+      ctx.lineTo(rx + 80 + i * 15, H); ctx.lineTo(rx - 20, H);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Bio glow (deep zones)
+  if (z.bioGlow) {
+    for (let i = 0; i < 8; i++) {
+      const bx = seeded(i * 137 + zi * 50) * W;
+      const by = seeded(i * 251 + zi * 30) * H;
+      const br = 20 + seeded(i * 73) * 40;
+      const pulse = 0.1 + Math.sin(gameTime * 1.5 + i * 1.2) * 0.08;
+      const grd2 = ctx.createRadialGradient(bx, by, 0, bx, by, br);
+      grd2.addColorStop(0, `rgba(100,180,255,${pulse})`); grd2.addColorStop(1, 'rgba(100,180,255,0)');
+      ctx.fillStyle = grd2; ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // Far terrain (0.15x parallax)
+  ctx.fillStyle = z.terrainCol + '40';
+  ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 6) {
+    const wx = x + camX * 0.15;
+    const ty = H - 60 - Math.sin(wx * 0.003) * 40 - Math.sin(wx * 0.007) * 20;
+    ctx.lineTo(x, ty);
+  }
+  ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+
+  // Mid terrain (0.4x parallax)
+  ctx.fillStyle = z.terrainCol + '70';
+  ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 4) {
+    const wx = x + camX * 0.4;
+    const ty = H - 35 - Math.sin(wx * 0.005) * 30 - Math.sin(wx * 0.012) * 15;
+    ctx.lineTo(x, ty);
+  }
+  ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+
+  // Decorations on mid terrain
+  if (z.decoType === 'coral') {
+    for (let wx = Math.floor((camX * 0.4) / 150) * 150; wx < camX * 0.4 + W + 150; wx += 150) {
+      const sx = wx - camX * 0.4;
+      const s = seeded(wx * 0.01 + zi);
+      if (s > 0.5) continue;
+      const terrY = H - 35 - Math.sin(wx * 0.005) * 30 - Math.sin(wx * 0.012) * 15;
+      const ch = 20 + s * 50;
+      ctx.fillStyle = z.decoColors[Math.floor(s * 4)];
+      // Branch coral
+      ctx.fillRect(sx - 2, terrY - ch, 4, ch);
+      ctx.beginPath(); ctx.arc(sx, terrY - ch, 6 + s * 8, 0, Math.PI * 2); ctx.fill();
+      if (s < 0.3) { ctx.fillRect(sx + 6, terrY - ch * 0.6, 3, ch * 0.4);
+        ctx.beginPath(); ctx.arc(sx + 7, terrY - ch * 0.6, 5, 0, Math.PI * 2); ctx.fill(); }
+    }
+  } else if (z.decoType === 'kelp') {
+    for (let wx = Math.floor((camX * 0.4) / 120) * 120; wx < camX * 0.4 + W + 120; wx += 120) {
+      const sx = wx - camX * 0.4;
+      const s = seeded(wx * 0.01 + 7);
+      if (s > 0.6) continue;
+      const terrY = H - 35 - Math.sin(wx * 0.005) * 30 - Math.sin(wx * 0.012) * 15;
+      ctx.strokeStyle = z.decoColors[Math.floor(s * 4)]; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(sx, terrY);
+      const kh = 80 + s * 120;
+      ctx.quadraticCurveTo(sx + Math.sin(gameTime + wx) * 15, terrY - kh * 0.5, sx + Math.sin(gameTime * 0.7 + wx) * 10, terrY - kh);
+      ctx.stroke();
+    }
+  } else if (z.decoType === 'rocks' || z.decoType === 'trench' || z.decoType === 'vents') {
+    for (let wx = Math.floor((camX * 0.4) / 200) * 200; wx < camX * 0.4 + W + 200; wx += 200) {
+      const sx = wx - camX * 0.4;
+      const s = seeded(wx * 0.01 + zi * 3);
+      if (s > 0.55) continue;
+      const terrY = H - 35 - Math.sin(wx * 0.005) * 30 - Math.sin(wx * 0.012) * 15;
+      ctx.fillStyle = z.decoColors[Math.floor(s * z.decoColors.length)];
+      const rw = 15 + s * 30, rh = 20 + s * 40;
+      ctx.beginPath(); ctx.moveTo(sx - rw, terrY); ctx.lineTo(sx - rw * 0.5, terrY - rh);
+      ctx.lineTo(sx + rw * 0.3, terrY - rh * 0.8); ctx.lineTo(sx + rw, terrY); ctx.closePath(); ctx.fill();
+      if (z.decoType === 'vents' && s < 0.25) {
+        // Vent glow
+        const vg = ctx.createRadialGradient(sx, terrY, 0, sx, terrY, 30);
+        vg.addColorStop(0, 'rgba(255,111,0,0.3)'); vg.addColorStop(1, 'rgba(255,111,0,0)');
+        ctx.fillStyle = vg; ctx.beginPath(); ctx.arc(sx, terrY, 30, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
+  // Near terrain (1x parallax)
+  ctx.fillStyle = z.terrainCol2;
+  ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 4) {
+    const wx = x + camX;
+    const ty = H - 10 - Math.sin(wx * 0.008) * 18 - Math.sin(wx * 0.02) * 8;
+    ctx.lineTo(x, ty);
+  }
+  ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+}
+
+// ============ PARTICLES ============
+function spawnCollect(x, y, col) {
+  for (let i = 0; i < 8; i++) {
+    const a = Math.random() * 6.28;
+    particles.push({ x, y, vx: Math.cos(a) * (40 + Math.random() * 60), vy: Math.sin(a) * (40 + Math.random() * 60),
+      life: 0.5 + Math.random() * 0.5, maxLife: 1, size: 2 + Math.random() * 3, color: col });
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    const alpha = clamp(p.life / p.maxLife, 0, 1);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ============ HUD ============
+function drawHUD() {
+  const z = ZONES[currentZone];
+  ctx.save();
+
+  // Zone name + progress
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  roundRect(W / 2 - 120, 8, 240, 28, 8); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+  ctx.fillText(`Zone ${currentZone + 1}: ${z.name}`, W / 2, 27);
+
+  // Progress bar
+  const prog = clamp(camera.x / z.length, 0, 1);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  roundRect(W / 2 - 100, 40, 200, 8, 4); ctx.fill();
+  ctx.fillStyle = '#4fc3f7';
+  if (prog > 0) { roundRect(W / 2 - 100, 40, 200 * prog, 8, 4); ctx.fill(); }
+
+  // Score
+  ctx.fillStyle = '#ffd54f'; ctx.font = 'bold 16px Arial'; ctx.textAlign = 'right';
+  ctx.fillText(`Score: ${score}`, W - 20, 30);
+
+  // Health hearts
+  ctx.textAlign = 'left';
+  for (let i = 0; i < sub.maxHealth; i++) {
+    ctx.fillStyle = i < sub.health ? '#f44336' : '#333';
+    ctx.font = '20px Arial';
+    ctx.fillText('♥', 16 + i * 26, 74);
+  }
+  if (activePowerUps.shield) {
+    ctx.fillStyle = '#64b5f6'; ctx.font = '20px Arial';
+    ctx.fillText('+🛡️', 16 + sub.maxHealth * 26, 74);
+  }
+
+  // Oxygen bar
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  roundRect(16, 82, 120, 14, 4); ctx.fill();
+  const o2pct = sub.oxygen / sub.maxOxygen;
+  ctx.fillStyle = o2pct > 0.3 ? '#29b6f6' : (o2pct > 0.15 ? '#ff9800' : '#f44336');
+  if (o2pct > 0) { roundRect(16, 82, 120 * o2pct, 14, 4); ctx.fill(); }
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center';
+  ctx.fillText(`O₂ ${Math.ceil(sub.oxygen)}%`, 76, 93);
+
+  // Active power-ups
+  let puY = 110;
+  ctx.textAlign = 'left'; ctx.font = '11px Arial';
+  if (activePowerUps.o2Boost) { ctx.fillStyle = '#81d4fa'; ctx.fillText('💨 O₂ Boost', 16, puY); puY += 18; }
+  if (activePowerUps.speed) { ctx.fillStyle = '#fff176'; ctx.fillText('⚡ Speed', 16, puY); puY += 18; }
+  if (activePowerUps.magnet && powerUpTimers.magnet > 0) { ctx.fillStyle = '#ef9a9a'; ctx.fillText(`🧲 Magnet ${Math.ceil(powerUpTimers.magnet)}s`, 16, puY); puY += 18; }
+  if (sonarAvailable && !sonarActive) { ctx.fillStyle = '#b39ddb'; ctx.fillText('📡 Sonar [SPACE]', 16, puY); puY += 18; }
+  if (sonarActive) { ctx.fillStyle = '#ce93d8'; ctx.fillText(`📡 Sonar ${Math.ceil(sonarTimer)}s`, 16, puY); puY += 18; }
+
+  // Touch joystick indicator
+  if (touchJoy.active) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(touchJoy.sx, touchJoy.sy, 50, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath(); ctx.arc(touchJoy.sx + touchJoy.dx * 50, touchJoy.sy + touchJoy.dy * 50, 20, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Touch action hint
+  if ('ontouchstart' in window && state === 'playing') {
+    ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.font = '11px Arial'; ctx.textAlign = 'right';
+    ctx.fillText('Tap right for sonar', W - 16, H - 20);
+  }
+
+  ctx.restore();
+}
+
+// ============ MENU ============
+function renderMenu() {
+  menuTime += 0.016;
+  // Background
+  const grd = ctx.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, '#0077b6'); grd.addColorStop(1, '#023e8a');
+  ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
+
+  // Light rays
+  ctx.globalAlpha = 0.05;
+  for (let i = 0; i < 6; i++) {
+    const rx = W * 0.1 + i * W * 0.15 + Math.sin(menuTime * 0.3 + i) * 30;
+    ctx.fillStyle = '#fff'; ctx.beginPath();
+    ctx.moveTo(rx, 0); ctx.lineTo(rx + 50, 0); ctx.lineTo(rx + 100, H); ctx.lineTo(rx - 30, H);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Ambient bubbles
+  for (let i = 0; i < 15; i++) {
+    const bx = seeded(i * 37) * W;
+    const by = (H + 50 - ((menuTime * 30 + i * 80) % (H + 100)));
+    const bs = 2 + seeded(i * 73) * 5;
+    ctx.fillStyle = `rgba(255,255,255,${0.15 + seeded(i * 19) * 0.15})`;
+    ctx.beginPath(); ctx.arc(bx + Math.sin(menuTime + i) * 10, by, bs, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // Animated sub
+  const subY = H * 0.42 + Math.sin(menuTime * 1.5) * 15;
+  drawSub(W * 0.5, subY, menuTime);
+
+  // Title
+  ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.min(48, W * 0.08)}px Arial`; ctx.textAlign = 'center';
+  ctx.shadowColor = '#ffd54f'; ctx.shadowBlur = 20;
+  ctx.fillText('REEF RESCUE', W / 2, H * 0.18);
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = '#90caf9'; ctx.font = `${Math.min(18, W * 0.035)}px Arial`;
+  ctx.fillText('An Underwater Science Adventure', W / 2, H * 0.24);
+
+  // Instructions
+  ctx.fillStyle = '#b3e5fc'; ctx.font = `${Math.min(14, W * 0.028)}px Arial`;
+  const instY = H * 0.6;
+  ctx.fillText('Pilot your submarine through 6 ocean zones', W / 2, instY);
+  ctx.fillText('Collect specimens • Rescue creatures • Answer science questions', W / 2, instY + 22);
+  ctx.fillText('Arrow keys / WASD to move • Space for sonar', W / 2, instY + 44);
+  if ('ontouchstart' in window) {
+    ctx.fillText('Touch: drag left side to move, tap right for sonar', W / 2, instY + 66);
+  }
+
+  // Start button
+  const blink = Math.sin(menuTime * 3) > 0;
+  if (blink) {
+    ctx.fillStyle = '#ffd54f'; ctx.font = `bold ${Math.min(22, W * 0.04)}px Arial`;
+    ctx.fillText('[ PRESS ENTER OR TAP TO START ]', W / 2, H * 0.82);
+  }
+
+  // Leaderboard preview
+  const lb = getLB();
+  if (lb.length > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    roundRect(W / 2 - 120, H * 0.87, 240, Math.min(lb.length, 3) * 20 + 30, 8); ctx.fill();
+    ctx.fillStyle = '#ffd54f'; ctx.font = 'bold 11px Arial';
+    ctx.fillText('TOP SCORES', W / 2, H * 0.87 + 18);
+    ctx.font = '12px Arial';
+    lb.slice(0, 3).forEach((e, i) => {
+      ctx.fillStyle = ['#ffd54f', '#c0c0c0', '#cd7f32'][i] || '#888';
+      ctx.fillText(`${i + 1}. ${e.name || 'PLAYER'} — ${e.score.toLocaleString()}`, W / 2, H * 0.87 + 36 + i * 20);
+    });
+  }
+}
+
+// ============ PLAYING UPDATE ============
+function updatePlaying(dt) {
+  const z = ZONES[currentZone];
+  gameTime += dt;
+  propAngle += dt * 10;
+
+  // Camera auto-scroll
+  camera.x += z.scrollSpeed * dt;
+
+  // Sub movement
+  let dx = 0, dy = 0;
+  if (keys['ArrowLeft'] || keys['KeyA']) dx--;
+  if (keys['ArrowRight'] || keys['KeyD']) dx++;
+  if (keys['ArrowUp'] || keys['KeyW']) dy--;
+  if (keys['ArrowDown'] || keys['KeyS']) dy++;
+  if (touchJoy.active) { dx += touchJoy.dx; dy += touchJoy.dy; }
+  const spd = activePowerUps.speed ? 320 : 240;
+  const len = Math.hypot(dx, dy);
+  if (len > 0) { dx /= len; dy /= len; }
+  sub.x += dx * spd * dt;
+  sub.y += dy * spd * dt;
+  sub.x = clamp(sub.x, 35, W - 35);
+  sub.y = clamp(sub.y, 35, H - 55);
+
+  // Oxygen
+  const o2Rate = activePowerUps.o2Boost ? 2.5 : 5;
+  sub.oxygen -= o2Rate * dt;
+  if (sub.oxygen <= 0) { sub.oxygen = 0; state = 'gameOver'; return; }
+
+  // Invincibility timer
+  if (sub.invincible > 0) sub.invincible -= dt;
+
+  // Sonar
+  if ((keys['Space'] || touchAction) && sonarAvailable && !sonarActive) {
+    sonarActive = true; sonarAvailable = false; sonarTimer = 6;
+    sfxSonar();
+  }
+  if (sonarActive) { sonarTimer -= dt; if (sonarTimer <= 0) { sonarActive = false; } }
+
+  // Magnet timer
+  if (activePowerUps.magnet && powerUpTimers.magnet > 0) {
+    powerUpTimers.magnet -= dt;
+    if (powerUpTimers.magnet <= 0) activePowerUps.magnet = false;
+  }
+
+  // Zone completion
+  if (camera.x >= z.length) {
+    score += 500 * (currentZone + 1);
+    sfxZoneClear();
+    if (currentZone < 5) {
+      startQuiz();
+      state = 'quiz';
+    } else {
+      state = 'victory';
+    }
+    return;
+  }
+
+  // Specimen collision
+  for (const sp of specimens) {
+    if (sp.collected) continue;
+    const sx = sp.worldX - camera.x;
+    if (sx < -100 || sx > W + 100) continue;
+    if (sp.hidden && !sonarActive) continue;
+    const magnetRange = activePowerUps.magnet ? 130 : 0;
+    const collectRange = 38;
+    const d = dist(sub.x, sub.y, sx, sp.y);
+    if (activePowerUps.magnet && d < magnetRange && d > collectRange) {
+      const angle = Math.atan2(sub.y - sp.y, sub.x - sx);
+      sp.worldX += Math.cos(angle) * 180 * dt + z.scrollSpeed * dt;
+      sp.y += Math.sin(angle) * 180 * dt;
+    }
+    if (d < collectRange) {
+      sp.collected = true;
+      score += sp.type.pts;
+      if (sp.isRescue) totalRescues++; else totalSpecimens++;
+      sfxCollect();
+      spawnCollect(sx, sp.y, sp.type.color);
+    }
+  }
+
+  // Hazard update & collision
+  for (const hz of hazards) {
+    if (hz.hit) continue;
+    hz.time += dt;
+    const sx = hz.worldX - camera.x;
+    if (sx < -150 || sx > W + 150) continue;
+
+    // Pattern movement
+    switch (hz.type.pattern) {
+      case 'sine': hz.y = hz.baseY + Math.sin(hz.time * 2) * 50; break;
+      case 'chase':
+        const ang = Math.atan2(sub.y - hz.y, sub.x - sx);
+        hz.worldX += Math.cos(ang) * hz.type.speed * dt + z.scrollSpeed * dt * 0.5;
+        hz.y += Math.sin(ang) * hz.type.speed * dt;
+        break;
+      case 'drift': hz.worldX += hz.type.speed * dt; break;
+      case 'fall': hz.y += hz.type.speed * dt;
+        if (hz.y > H + 50) { hz.y = -50; hz.worldX += 100; } break;
+    }
+
+    if (sub.invincible > 0) continue;
+    const hx = hz.worldX - camera.x;
+    if (dist(sub.x, sub.y, hx, hz.y) < 32) {
+      hz.hit = true;
+      shakeTimer = 0.3; shakeIntensity = 6;
+      if (activePowerUps.shield) {
+        activePowerUps.shield = false;
+        sfxDamage();
+      } else {
+        sub.health--;
+        sfxDamage();
+        sub.invincible = 1.2;
+        if (sub.health <= 0) { state = 'gameOver'; return; }
+      }
+    }
+  }
+
+  // O2 bubble collision
+  for (const o2 of o2Bubbles) {
+    if (o2.collected) continue;
+    const ox = o2.worldX - camera.x;
+    if (ox < -50 || ox > W + 50) continue;
+    if (dist(sub.x, sub.y, ox, o2.y) < 35) {
+      o2.collected = true;
+      sub.oxygen = Math.min(sub.maxOxygen, sub.oxygen + 25);
+      sfxBubble();
+    }
+  }
+
+  // Screen shake
+  if (shakeTimer > 0) shakeTimer -= dt;
+
+  // Ambient bubbles
+  if (Math.random() < 2 * dt) {
+    particles.push({ x: Math.random() * W, y: H + 5, vx: (Math.random() - 0.5) * 15,
+      vy: -25 - Math.random() * 40, life: 3 + Math.random() * 3, maxLife: 6,
+      size: 1.5 + Math.random() * 3, color: 'rgba(255,255,255,0.25)' });
+  }
+  updateParticles(dt);
+}
+
+// ============ PLAYING RENDER ============
+function renderPlaying() {
+  ctx.save();
+  if (shakeTimer > 0) {
+    ctx.translate(Math.random() * shakeIntensity - shakeIntensity / 2, Math.random() * shakeIntensity - shakeIntensity / 2);
+  }
+
+  drawBackground(currentZone, camera.x);
+
+  // O2 bubbles
+  for (const o2 of o2Bubbles) {
+    if (o2.collected) continue;
+    const ox = o2.worldX - camera.x;
+    if (ox < -30 || ox > W + 30) continue;
+    const by = o2.y + Math.sin(gameTime * 2 + o2.bob) * 5;
+    ctx.fillStyle = `rgba(100,200,255,${0.5 + Math.sin(gameTime * 3 + o2.bob) * 0.2})`;
+    ctx.beginPath(); ctx.arc(ox, by, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(150,220,255,0.4)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(ox, by, 13, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 8px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('O₂', ox, by + 3);
+  }
+
+  // Specimens
+  for (const sp of specimens) {
+    if (sp.collected) continue;
+    const sx = sp.worldX - camera.x;
+    if (sx < -60 || sx > W + 60) continue;
+    if (sp.hidden && !sonarActive) continue;
+    const by = sp.y + Math.sin(gameTime * 1.5 + sp.bob) * 6;
+    // Glow
+    ctx.shadowColor = sp.type.color; ctx.shadowBlur = sp.hidden ? 20 : 10;
+    if (sp.hidden) ctx.globalAlpha = 0.5 + Math.sin(gameTime * 4) * 0.2;
+    drawSpecimenShape(sp.type, sx, by, 28, gameTime);
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    // Net for rescue creatures
+    if (sp.isRescue) drawNet(sx, by, 28);
+    // Label
+    ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '9px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(sp.type.name, sx, by - 22);
+    ctx.fillStyle = '#ffd54f'; ctx.fillText(`+${sp.type.pts}`, sx, by + 26);
+  }
+
+  // Hazards
+  for (const hz of hazards) {
+    if (hz.hit) continue;
+    const hx = hz.worldX - camera.x;
+    if (hx < -80 || hx > W + 80) continue;
+    // Warning indicator when close
+    if (hx > W - 80 && hx <= W + 80) {
+      ctx.fillStyle = 'rgba(255,0,0,0.3)';
+      ctx.beginPath(); ctx.moveTo(W - 5, hz.y - 10); ctx.lineTo(W - 15, hz.y); ctx.lineTo(W - 5, hz.y + 10); ctx.closePath(); ctx.fill();
+    }
+    drawHazardShape(hz, hx, hz.y, 36, gameTime);
+  }
+
+  // Sonar pulse ring
+  if (sonarActive) {
+    const pulseR = ((6 - sonarTimer) * 80) % 300;
+    ctx.strokeStyle = `rgba(180,150,255,${0.3 * (1 - pulseR / 300)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sub.x, sub.y, pulseR, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  // Submarine
+  if (sub.invincible > 0 && Math.sin(sub.invincible * 20) > 0) {
+    ctx.globalAlpha = 0.4;
+  }
+  drawSub(sub.x, sub.y, gameTime);
+  ctx.globalAlpha = 1;
+
+  drawParticles();
+  ctx.restore();
+  drawHUD();
+}
+
+// ============ QUIZ ============
+function startQuiz() {
+  const z = ZONES[currentZone];
+  const topic = z.quizTopic;
+  const pool = shuffle(QUESTIONS.filter(q => q.topic === topic)).slice(0, 3);
+  if (pool.length < 3) {
+    const extra = shuffle(QUESTIONS.filter(q => q.topic !== topic));
+    while (pool.length < 3 && extra.length) pool.push(extra.pop());
+  }
+  quiz = { questions: pool, qi: 0, answered: false, sel: -1, correct: 0, earned: [], showSummary: false, timer: 0 };
+}
+
+function getQuizButtonRects() {
+  const rects = [];
+  const bw = Math.min(500, W - 60);
+  const bh = 48;
+  const gap = 12;
+  const startY = H * 0.42;
+  const bx = W / 2 - bw / 2;
+  for (let i = 0; i < 4; i++) {
+    rects.push({ x: bx, y: startY + i * (bh + gap), w: bw, h: bh });
+  }
+  return rects;
+}
+
+function renderQuiz() {
+  quiz.timer += 0.016;
+  // Background - keep the zone bg
+  drawBackground(currentZone, camera.x);
+  // Dark overlay
+  ctx.fillStyle = 'rgba(0,0,10,0.75)';
+  ctx.fillRect(0, 0, W, H);
+
+  if (quiz.showSummary) {
+    // Summary screen
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.min(28, W * 0.05)}px Arial`; ctx.textAlign = 'center';
+    ctx.fillText('Checkpoint Complete!', W / 2, H * 0.2);
+    ctx.fillStyle = '#4fc3f7'; ctx.font = `${Math.min(18, W * 0.035)}px Arial`;
+    ctx.fillText(`${quiz.correct}/3 correct`, W / 2, H * 0.28);
+
+    if (quiz.earned.length > 0) {
+      ctx.fillStyle = '#ffd54f'; ctx.font = `bold ${Math.min(16, W * 0.03)}px Arial`;
+      ctx.fillText('Power-ups earned:', W / 2, H * 0.38);
+      quiz.earned.forEach((pu, i) => {
+        const pInfo = POWER_UP_TYPES.find(p => p.id === pu);
+        ctx.fillStyle = '#b3e5fc'; ctx.font = `${Math.min(15, W * 0.028)}px Arial`;
+        ctx.fillText(`${pInfo.icon} ${pInfo.name} — ${pInfo.desc}`, W / 2, H * 0.44 + i * 24);
+      });
+    } else {
+      ctx.fillStyle = '#90a4ae'; ctx.font = `${Math.min(14, W * 0.028)}px Arial`;
+      ctx.fillText('Keep trying! Science is about learning!', W / 2, H * 0.4);
+    }
+
+    const nextZone = ZONES[currentZone + 1];
+    const blink = Math.sin(quiz.timer * 3) > 0;
+    if (blink) {
+      ctx.fillStyle = '#ffd54f'; ctx.font = `bold ${Math.min(18, W * 0.035)}px Arial`;
+      ctx.fillText(`[ TAP TO ENTER ${nextZone.name.toUpperCase()} ]`, W / 2, H * 0.7);
+    }
+    return;
+  }
+
+  const q = quiz.questions[quiz.qi];
+  if (!q) return;
+
+  // Header
+  ctx.fillStyle = '#ffd54f'; ctx.font = `bold ${Math.min(16, W * 0.03)}px Arial`; ctx.textAlign = 'center';
+  ctx.fillText(`Science Checkpoint — Question ${quiz.qi + 1}/3`, W / 2, H * 0.12);
+
+  // Zone topic
+  ctx.fillStyle = '#90caf9'; ctx.font = `${Math.min(12, W * 0.025)}px Arial`;
+  const topicNames = { living1: 'Living World', living2: 'Living World', physical: 'Physical World', earth: 'Earth & Space', material: 'Material World', mixed: 'Mixed Review' };
+  ctx.fillText(topicNames[q.topic] || '', W / 2, H * 0.17);
+
+  // Question
+  ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.min(18, W * 0.035)}px Arial`;
+  // Word wrap question
+  const words = q.q.split(' ');
+  let lines = ['']; const maxW = W - 80;
+  for (const w of words) {
+    const test = lines[lines.length - 1] + (lines[lines.length - 1] ? ' ' : '') + w;
+    if (ctx.measureText(test).width > maxW) lines.push(w);
+    else lines[lines.length - 1] = test;
+  }
+  lines.forEach((ln, i) => ctx.fillText(ln, W / 2, H * 0.25 + i * 24));
+
+  // Answer buttons
+  const rects = getQuizButtonRects();
+  const labels = ['A', 'B', 'C', 'D'];
+  q.a.forEach((ans, i) => {
+    const r = rects[i];
+    let bg = 'rgba(255,255,255,0.08)';
+    let fg = '#e0e0e0';
+    if (quiz.answered) {
+      if (i === q.c) { bg = 'rgba(76,175,80,0.4)'; fg = '#a5d6a7'; }
+      else if (i === quiz.sel && i !== q.c) { bg = 'rgba(244,67,54,0.4)'; fg = '#ef9a9a'; }
+    }
+    ctx.fillStyle = bg;
+    roundRect(r.x, r.y, r.w, r.h, 10); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+    roundRect(r.x, r.y, r.w, r.h, 10); ctx.stroke();
+    ctx.fillStyle = fg; ctx.font = `${Math.min(14, W * 0.028)}px Arial`; ctx.textAlign = 'left';
+    ctx.fillText(`${labels[i]}. ${ans}`, r.x + 16, r.y + r.h / 2 + 5);
+  });
+
+  // Feedback
+  if (quiz.answered) {
+    const isCorrect = quiz.sel === q.c;
+    ctx.textAlign = 'center'; ctx.font = `bold ${Math.min(16, W * 0.03)}px Arial`;
+    if (isCorrect) {
+      ctx.fillStyle = '#a5d6a7';
+      ctx.fillText('Correct! Great work! 🎉', W / 2, H * 0.82);
+      const pu = quiz.earned[quiz.earned.length - 1];
+      if (pu) {
+        const info = POWER_UP_TYPES.find(p => p.id === pu);
+        ctx.fillStyle = '#ffd54f'; ctx.font = `${Math.min(14, W * 0.028)}px Arial`;
+        ctx.fillText(`Power-up: ${info.icon} ${info.name}`, W / 2, H * 0.86);
+      }
+    } else {
+      ctx.fillStyle = '#ef9a9a';
+      ctx.fillText('Not quite — keep learning! 🌊', W / 2, H * 0.82);
+      ctx.fillStyle = '#90a4ae'; ctx.font = `${Math.min(13, W * 0.025)}px Arial`;
+      ctx.fillText(`The answer was: ${q.a[q.c]}`, W / 2, H * 0.86);
+    }
+    const blink = Math.sin(quiz.timer * 3) > 0;
+    if (blink) {
+      ctx.fillStyle = '#80cbc4'; ctx.font = `bold ${Math.min(14, W * 0.028)}px Arial`;
+      ctx.fillText('[ TAP TO CONTINUE ]', W / 2, H * 0.93);
+    }
+  }
+}
+
+// ============ GAME OVER / VICTORY ============
+function renderEndScreen(isVictory) {
+  drawBackground(currentZone, camera.x);
+  ctx.fillStyle = 'rgba(0,0,10,0.8)'; ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  if (isVictory) {
+    ctx.fillStyle = '#ffd54f'; ctx.font = `bold ${Math.min(36, W * 0.06)}px Arial`;
+    ctx.shadowColor = '#ffd54f'; ctx.shadowBlur = 20;
+    ctx.fillText('MISSION COMPLETE!', W / 2, H * 0.18);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#a5d6a7'; ctx.font = `${Math.min(16, W * 0.03)}px Arial`;
+    ctx.fillText('All 6 zones explored! Outstanding work, scientist!', W / 2, H * 0.25);
+  } else {
+    ctx.fillStyle = '#f44336'; ctx.font = `bold ${Math.min(36, W * 0.06)}px Arial`;
+    ctx.shadowColor = '#f44336'; ctx.shadowBlur = 20;
+    ctx.fillText('GAME OVER', W / 2, H * 0.18);
+    ctx.shadowBlur = 0;
+    const reason = sub.oxygen <= 0 ? 'Oxygen depleted!' : 'Hull breached!';
+    ctx.fillStyle = '#ef9a9a'; ctx.font = `${Math.min(16, W * 0.03)}px Arial`;
+    ctx.fillText(reason, W / 2, H * 0.25);
+  }
+
+  // Stats
+  ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.min(22, W * 0.04)}px Arial`;
+  ctx.fillText(`Final Score: ${score.toLocaleString()}`, W / 2, H * 0.35);
+  ctx.fillStyle = '#90caf9'; ctx.font = `${Math.min(14, W * 0.028)}px Arial`;
+  ctx.fillText(`Zone reached: ${currentZone + 1}/6 — ${ZONES[currentZone].name}`, W / 2, H * 0.41);
+  ctx.fillText(`Specimens: ${totalSpecimens} | Rescues: ${totalRescues}`, W / 2, H * 0.46);
+
+  const blink = Math.sin(gameTime * 3) > 0;
+  if (blink) {
+    ctx.fillStyle = '#ffd54f'; ctx.font = `bold ${Math.min(18, W * 0.035)}px Arial`;
+    ctx.fillText('[ TAP TO ENTER YOUR NAME ]', W / 2, H * 0.56);
+  }
+}
+
+// ============ NAME ENTRY ============
+function renderNameEntry() {
+  drawBackground(0, 0);
+  ctx.fillStyle = 'rgba(0,0,10,0.85)'; ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffd54f'; ctx.font = `bold ${Math.min(24, W * 0.04)}px Arial`;
+  ctx.fillText('ENTER YOUR NAME', W / 2, H * 0.12);
+
+  ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.min(18, W * 0.035)}px Arial`;
+  ctx.fillText(`Score: ${score.toLocaleString()}`, W / 2, H * 0.18);
+
+  // Name display
+  const nameStr = nameChars.join('');
+  const dispW = Math.min(300, W - 60);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  roundRect(W / 2 - dispW / 2, H * 0.22, dispW, 44, 8); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1;
+  roundRect(W / 2 - dispW / 2, H * 0.22, dispW, 44, 8); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.min(24, W * 0.04)}px monospace`;
+  const cursor = Math.sin(gameTime * 4) > 0 ? '|' : '';
+  ctx.fillText(nameStr + cursor, W / 2, H * 0.22 + 30);
+
+  // Virtual keyboard
+  const kbW = Math.min(500, W - 30);
+  const keyW = kbW / 11;
+  const keyH = Math.min(44, H * 0.07);
+  const kbStartY = H * 0.35;
+
+  KB_ROWS.forEach((row, ri) => {
+    const rowW = row.length * (keyW + 4) - 4;
+    const startX = W / 2 - rowW / 2;
+    row.forEach((ch, ci) => {
+      const kx = startX + ci * (keyW + 4);
+      const ky = kbStartY + ri * (keyH + 6);
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      roundRect(kx, ky, keyW, keyH, 6); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+      roundRect(kx, ky, keyW, keyH, 6); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.min(16, keyW * 0.6)}px Arial`;
+      ctx.fillText(ch, kx + keyW / 2, ky + keyH / 2 + 5);
+    });
+  });
+
+  // Special keys row
+  const specY = kbStartY + 3 * (keyH + 6);
+  const specKeys = [{ label: '⌫ DEL', w: kbW * 0.3 }, { label: 'SPACE', w: kbW * 0.35 }, { label: '✓ DONE', w: kbW * 0.3 }];
+  let specX = W / 2 - kbW / 2;
+  specKeys.forEach(sk => {
+    ctx.fillStyle = sk.label.includes('DONE') ? 'rgba(76,175,80,0.3)' : 'rgba(255,255,255,0.1)';
+    roundRect(specX, specY, sk.w, keyH, 6); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+    roundRect(specX, specY, sk.w, keyH, 6); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.min(14, W * 0.028)}px Arial`;
+    ctx.fillText(sk.label, specX + sk.w / 2, specY + keyH / 2 + 5);
+    specX += sk.w + 6;
+  });
+
+  // Leaderboard preview below keyboard
+  const lb = getLB();
+  if (lb.length > 0) {
+    const lbY = specY + keyH + 25;
+    ctx.fillStyle = '#ffd54f'; ctx.font = 'bold 12px Arial';
+    ctx.fillText('LEADERBOARD', W / 2, lbY);
+    ctx.font = '12px Arial';
+    lb.slice(0, 5).forEach((e, i) => {
+      ctx.fillStyle = ['#ffd54f', '#c0c0c0', '#cd7f32', '#888', '#888'][i];
+      ctx.fillText(`${i + 1}. ${e.name} — ${e.score.toLocaleString()}`, W / 2, lbY + 20 + i * 18);
+    });
+  }
+}
+
+// ============ CLICK / TAP HANDLER ============
+function handleClick(cx, cy) {
+  ensureAudio();
+
+  if (state === 'menu') {
+    sfxStart();
+    score = 0; totalSpecimens = 0; totalRescues = 0;
+    activePowerUps = {}; powerUpTimers = {}; sonarAvailable = false;
+    gameTime = 0;
+    initZone(0);
+    state = 'playing';
+    return;
+  }
+
+  if (state === 'quiz') {
+    if (quiz.showSummary) {
+      // Advance to next zone
+      const nextZi = currentZone + 1;
+      // Apply earned power-ups
+      quiz.earned.forEach(pu => {
+        activePowerUps[pu] = true;
+        if (pu === 'magnet') powerUpTimers.magnet = 10;
+        if (pu === 'sonar') { sonarAvailable = true; activePowerUps.sonar = false; }
+      });
+      initZone(nextZi);
+      state = 'playing';
+      return;
+    }
+    if (quiz.answered) {
+      // Next question or summary
+      quiz.qi++;
+      quiz.answered = false; quiz.sel = -1; quiz.timer = 0;
+      if (quiz.qi >= 3) { quiz.showSummary = true; quiz.timer = 0; }
+      return;
+    }
+    // Check which answer was clicked
+    const rects = getQuizButtonRects();
+    for (let i = 0; i < 4; i++) {
+      const r = rects[i];
+      if (cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h) {
+        quiz.sel = i; quiz.answered = true; quiz.timer = 0;
+        const q = quiz.questions[quiz.qi];
+        if (i === q.c) {
+          quiz.correct++;
+          sfxQuizCorrect();
+          // Award power-up
+          const available = POWER_UP_TYPES.filter(p => !quiz.earned.includes(p.id));
+          if (available.length > 0) {
+            const pu = available[Math.floor(Math.random() * available.length)];
+            quiz.earned.push(pu.id);
+          }
+        } else {
+          sfxQuizWrong();
+        }
+        return;
+      }
+    }
+    return;
+  }
+
+  if (state === 'gameOver' || state === 'victory') {
+    nameChars = []; nameCursor = 0;
+    state = 'nameEntry';
+    return;
+  }
+
+  if (state === 'nameEntry') {
+    // Check virtual keyboard clicks
+    const kbW = Math.min(500, W - 30);
+    const keyW = kbW / 11;
+    const keyH = Math.min(44, H * 0.07);
+    const kbStartY = H * 0.35;
+
+    // Letter keys
+    for (let ri = 0; ri < KB_ROWS.length; ri++) {
+      const row = KB_ROWS[ri];
+      const rowW = row.length * (keyW + 4) - 4;
+      const startX = W / 2 - rowW / 2;
+      for (let ci = 0; ci < row.length; ci++) {
+        const kx = startX + ci * (keyW + 4);
+        const ky = kbStartY + ri * (keyH + 6);
+        if (cx >= kx && cx <= kx + keyW && cy >= ky && cy <= ky + keyH) {
+          if (nameChars.length < 12) { nameChars.push(row[ci]); playTone(600, 0.05, 'square', 0.06); }
+          return;
+        }
+      }
+    }
+
+    // Special keys
+    const specY = kbStartY + 3 * (keyH + 6);
+    const specKeys = [{ w: kbW * 0.3 }, { w: kbW * 0.35 }, { w: kbW * 0.3 }];
+    let specX = W / 2 - kbW / 2;
+
+    // DEL
+    if (cx >= specX && cx <= specX + specKeys[0].w && cy >= specY && cy <= specY + keyH) {
+      nameChars.pop(); playTone(300, 0.05, 'square', 0.06); return;
+    }
+    specX += specKeys[0].w + 6;
+
+    // SPACE
+    if (cx >= specX && cx <= specX + specKeys[1].w && cy >= specY && cy <= specY + keyH) {
+      if (nameChars.length < 12) { nameChars.push(' '); playTone(600, 0.05, 'square', 0.06); }
+      return;
+    }
+    specX += specKeys[1].w + 6;
+
+    // DONE
+    if (cx >= specX && cx <= specX + specKeys[2].w && cy >= specY && cy <= specY + keyH) {
+      const name = nameChars.join('').trim() || 'PLAYER';
+      saveLB(name, score);
+      sfxZoneClear();
+      state = 'menu';
+      return;
+    }
+    return;
+  }
+
+  // During playing - right side tap for sonar
+  if (state === 'playing' && cx > W * 0.6) {
+    if (sonarAvailable && !sonarActive) {
+      sonarActive = true; sonarAvailable = false; sonarTimer = 6;
+      sfxSonar();
+    }
+  }
+}
+
+// Physical keyboard for name entry
+addEventListener('keydown', e => {
+  if (state === 'nameEntry') {
+    if (e.key === 'Backspace') { nameChars.pop(); e.preventDefault(); }
+    else if (e.key === 'Enter') {
+      const name = nameChars.join('').trim() || 'PLAYER';
+      saveLB(name, score); sfxZoneClear(); state = 'menu';
+    }
+    else if (e.key.length === 1 && nameChars.length < 12) {
+      nameChars.push(e.key.toUpperCase());
+    }
+  }
+  if (state === 'menu' && (e.code === 'Enter' || e.code === 'Space')) {
+    handleClick(W / 2, H / 2);
+  }
+});
+
+canvas.addEventListener('click', e => handleClick(e.clientX, e.clientY));
+
+// ============ MAIN LOOP ============
+let lastTime = 0;
+function gameLoop(ts) {
+  const dt = Math.min((ts - lastTime) / 1000, 0.05);
+  lastTime = ts;
+
+  switch (state) {
+    case 'menu': renderMenu(); break;
+    case 'playing': updatePlaying(dt); renderPlaying(); break;
+    case 'quiz': renderQuiz(); break;
+    case 'gameOver': gameTime += dt; renderEndScreen(false); break;
+    case 'victory': gameTime += dt; renderEndScreen(true); break;
+    case 'nameEntry': gameTime += dt; renderNameEntry(); break;
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+
+})();
+</script>
+</body>
+</html>
